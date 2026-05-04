@@ -5,7 +5,7 @@ import os
 import struct
 import time
 
-from jkey.pv.core import load_recovery, load_totp, save_recovery, save_totp
+from jkey.pv.core import load_recovery, save_recovery
 
 
 def _hotp(secret: bytes, counter: int, digits: int = 6) -> str:
@@ -56,69 +56,3 @@ def _import_recovery_file(account: str, recovery_path: str | None):
             print(f"Imported {len(codes)} recovery codes for {account}")
     except OSError as e:
         print(f"Warning: Could not read recovery file: {e}")
-
-
-def list_accounts(keyword: str | None = None):
-    data = load_totp()
-    if data is None:
-        return
-    if not data:
-        print("No 2FA accounts found.")
-        return
-    keys = sorted(data.keys())
-    if keyword:
-        keys = [k for k in keys if keyword.lower() in k.lower()]
-        if not keys:
-            print(f"No accounts matching '{keyword}'.")
-            return
-    for acc_id in keys:
-        secret = data[acc_id]
-        try:
-            print(f"{acc_id}: {totp(secret)}")
-        except Exception as e:
-            print(f"Error processing '{acc_id}': {e}")
-
-
-def show_code(account: str):
-    data = load_totp()
-    if data is None:
-        return
-    if account not in data:
-        print(f"Error: Account '{account}' not found.")
-        return
-    secret = data[account]
-    try:
-        print(f"{account}: {totp(secret)}")
-    except Exception as e:
-        print(f"Error processing '{account}': {e}")
-
-
-def add_account(name: str, secret: str, recovery_path: str | None = None):
-    if not _validate_b32_secret(secret):
-        print(f"Error: Invalid base32 secret for '{name}'.")
-        return
-    data = load_totp()
-    if data is None:
-        return
-    data[name] = secret
-    save_totp(data)
-    print(f"Added 2FA account: {name}")
-    _import_recovery_file(name, recovery_path)
-
-
-def remove_account(account: str):
-    data = load_totp()
-    if data is None:
-        return
-    if account not in data:
-        print(f"Error: Account '{account}' not found.")
-        return
-    del data[account]
-    save_totp(data)
-
-    rc = load_recovery()
-    if rc and account in rc:
-        del rc[account]
-        save_recovery(rc)
-
-    print(f"Removed 2FA account: {account}")

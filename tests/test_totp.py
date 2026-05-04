@@ -37,8 +37,6 @@ class TestValidateB32:
 
 
 class TestHOTP:
-    """Test vectors from RFC 4226."""
-
     def _hotp_func(self, counter: int) -> str:
         secret_bytes = b"12345678901234567890"
         return _hotp(secret_bytes, counter)

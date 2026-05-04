@@ -1,8 +1,8 @@
 
 import pytest
 
-from jkey.pm.gen import _SYMBOLS as SYMBOLS
-from jkey.pm.gen import generate_password
+from jkey.pm.get import _SYMBOLS as SYMBOLS
+from jkey.pm.get import generate_password
 
 
 class TestGeneratePassword:
@@ -57,12 +57,10 @@ class TestGeneratePassword:
             generate_password(length=1, uppercase=True, lowercase=True, digits=True, symbols=True)
 
     def test_uniqueness(self):
-        """Multiple generations should produce different passwords."""
         passwords = {generate_password() for _ in range(20)}
         assert len(passwords) >= 18
 
     def test_no_predictable_pattern(self):
-        """Check that passwords don't have obvious patterns."""
         pw = generate_password(length=100)
         for c in set(pw):
             assert pw.count(c * 5) == 0

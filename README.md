@@ -20,17 +20,15 @@ uv run jkey --help
 # Initialize vault (set master password)
 jkey pv init
 
-# Add a 2FA account
-jkey 2fa add github JBSWY3DPEHPK3PXP
+# Add a 2FA account from QR code image
+jkey 2fa add ./github.jpg
 
-# Get current TOTP code
-jkey 2fa get github
-
-# Import from QR code image
-jkey 2fa qr ./github.jpg
+# List TOTP codes (optional keyword filter)
+jkey 2fa ls
+jkey 2fa ls github
 
 # Generate a random password
-jkey pm gen -L 24
+jkey pm get -L 24
 
 # Store a password
 jkey pm add my-site
@@ -48,16 +46,12 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | Command | Description |
 |---------|-------------|
 | `jkey 2fa ls [keyword]` | List TOTP accounts and codes |
-| `jkey 2fa get <account>` | Show TOTP code for an account |
-| `jkey 2fa add <name> <secret>` | Add a TOTP account |
-| `jkey 2fa qr <image>` | Import from QR code image |
+| `jkey 2fa add <image>` | Import from QR code image |
 | `jkey 2fa rm <account>` | Remove a TOTP account |
-| `jkey pm gen [-L N]` | Generate a random password |
 | `jkey pm ls [keyword]` | List stored passwords |
-| `jkey pm get <name>` | Show a stored password |
+| `jkey pm get [-L N]` | Generate a random password |
 | `jkey pm add <name>` | Store a password (prompts for input) |
 | `jkey pm rm <name>` | Delete a stored password |
-| `jkey pm import <csv>` | Import passwords from CSV (name,password) |
 | `jkey pv init` | Initialize the encrypted vault |
 | `jkey pv unlock` | Unlock the vault |
 | `jkey pv lock` | Lock the vault |
@@ -78,13 +72,14 @@ Data is encrypted with AES-256-CBC + HMAC-SHA256 and stored in `~/.config/jkey/`
 
 ```
 ~/.config/jkey/
-├── totp.jkey        # Encrypted TOTP secrets
-├── passwords.jkey   # Encrypted passwords
-├── recovery.jkey    # Encrypted recovery codes
-└── qr/              # Encrypted QR images
+├── .session          # Session cache (5 min timeout)
+├── totp.jkey         # Encrypted TOTP secrets
+├── passwords.jkey    # Encrypted passwords
+├── recovery.jkey     # Encrypted recovery codes
+└── qr/               # Encrypted QR images
 ```
 
-Back up `~/.config/jkey/` to migrate to another machine.
+Back up `~/.config/jkey/` (excluding `.session`) to migrate to another machine.
 
 ## Dependencies
 
