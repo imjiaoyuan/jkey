@@ -10,8 +10,13 @@ This file provides guidance to Claude Code when working with code in this reposi
 
 ### 2FA
 - `uv run jkey 2fa ls [keyword]` — List accounts and current TOTP codes (case-insensitive filter)
-- `uv run jkey 2fa add <image_path> [--recovery <file>]` — Import account from QR code image (auto-saves image encrypted)
+- `uv run jkey 2fa add <image_path>` — Import account from QR code image (auto-saves image encrypted)
 - `uv run jkey 2fa rm <account>` — Remove an account
+
+### Recovery Codes
+- `uv run jkey rc add <file>` — Import recovery codes from file (filename as account name)
+- `uv run jkey rc ls [keyword]` — List recovery codes
+- `uv run jkey rc rm <account>` — Remove recovery codes
 
 ### Password Management
 - `uv run jkey pm ls [keyword]` — List/filter stored passwords
@@ -49,6 +54,10 @@ src/
     │   ├── add.py               # QR code scanning and import
     │   ├── ls.py                # List accounts and TOTP codes
     │   └── rm.py                # Remove account
+    ├── rc/
+    │   ├── add.py               # Import recovery codes
+    │   ├── ls.py                # List recovery codes
+    │   └── rm.py                # Remove recovery codes
     ├── pm/
     │   ├── core.py              # Password data access
     │   ├── add.py               # Store password

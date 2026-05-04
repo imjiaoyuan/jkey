@@ -48,6 +48,9 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey 2fa ls [keyword]` | List TOTP accounts and codes |
 | `jkey 2fa add <image>` | Import from QR code image |
 | `jkey 2fa rm <account>` | Remove a TOTP account |
+| `jkey rc add <file>` | Import recovery codes from file |
+| `jkey rc ls [keyword]` | List recovery codes |
+| `jkey rc rm <account>` | Remove recovery codes |
 | `jkey pm ls [keyword]` | List stored passwords |
 | `jkey pm get [-L N]` | Generate a random password |
 | `jkey pm add <name>` | Store a password (prompts for input) |
