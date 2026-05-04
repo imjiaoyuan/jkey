@@ -4,8 +4,6 @@ import hmac
 import json
 import os
 
-import pytest
-
 from jkey import aes
 
 
@@ -45,7 +43,6 @@ class TestEncryptDecrypt:
     def test_corrupted_ciphertext(self):
         data = {"key": "value"}
         encrypted = aes.encrypt(data, "password")
-        # Corrupt the ciphertext
         ct = bytearray(base64.b64decode(encrypted["data"]))
         ct[0] ^= 0xff
         encrypted["data"] = base64.b64encode(bytes(ct)).decode()
