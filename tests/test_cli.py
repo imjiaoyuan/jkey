@@ -1,5 +1,4 @@
 import sys
-from argparse import ArgumentError
 
 import pytest
 
@@ -10,7 +9,6 @@ class TestParser:
     def _parser(self):
         """Build the parser (same as cli.main)."""
         import argparse
-        import importlib
 
         parser = argparse.ArgumentParser(
             prog="jkey",
@@ -209,7 +207,6 @@ class TestParser:
 class TestMainDispatch:
     def test_main_no_command(self, vault_dir, monkeypatch):
         """main() with no command should print help and exit 1."""
-        import sys
 
         monkeypatch.setattr(sys, "argv", ["jkey"])
         from jkey.cli import main
@@ -219,7 +216,6 @@ class TestMainDispatch:
         assert exc.value.code == 1
 
     def test_main_2fa_help(self, capsys, monkeypatch):
-        import sys
 
         monkeypatch.setattr(sys, "argv", ["jkey", "2fa", "--help"])
         from jkey.cli import main

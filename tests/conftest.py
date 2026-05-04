@@ -1,9 +1,6 @@
 import os
-import shutil
 
 import pytest
-
-from jkey import aes
 
 
 @pytest.fixture
