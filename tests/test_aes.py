@@ -57,7 +57,6 @@ class TestEncryptDecrypt:
         assert aes.decrypt(encrypted, "password") is None
 
     def test_iv_used(self):
-        """Each encryption should produce a different ciphertext (random salt + iv)."""
         data = {"key": "value"}
         e1 = aes.encrypt(data, "password")
         e2 = aes.encrypt(data, "password")
@@ -67,8 +66,6 @@ class TestEncryptDecrypt:
 
 
 class TestV2Compat:
-    """Ensure we can still decrypt v2 format (single key for enc + mac)."""
-
     def _make_v2(self, data: dict, password: str) -> dict:
         salt = os.urandom(16)
         iv = os.urandom(16)
@@ -97,7 +94,6 @@ class TestV2Compat:
         assert aes.decrypt(v2, "wrong") is None
 
     def test_v2_roundtrip_then_v3(self):
-        """V2 data decrypts, and new encrypt produces v3."""
         data = {"key": "value"}
         v2 = self._make_v2(data, "pass")
         assert aes.decrypt(v2, "pass") == data

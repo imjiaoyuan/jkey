@@ -1,7 +1,7 @@
 import base64
-import getpass
 import json
 import os
+import time
 
 from jkey import aes
 
@@ -10,6 +10,8 @@ TOTP_FILE = os.path.join(CONFIG_DIR, "totp.jkey")
 PASSWORDS_FILE = os.path.join(CONFIG_DIR, "passwords.jkey")
 RECOVERY_FILE = os.path.join(CONFIG_DIR, "recovery.jkey")
 QR_DIR = os.path.join(CONFIG_DIR, "qr")
+SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
+SESSION_TIMEOUT = 300
 
 _session_password: str | None = None
 _totp_cache: dict | None = None
@@ -27,20 +29,61 @@ def _password_from_env() -> str | None:
 
 
 def _prompt_password(prompt: str = "Master password: ") -> str:
+    import getpass
     return getpass.getpass(prompt)
+
+
+def _save_session(password, totp, passwords, recovery):
+    _ensure_dir()
+    try:
+        with open(SESSION_FILE, "w") as f:
+            json.dump({
+                "expires": time.time() + SESSION_TIMEOUT,
+                "password": password,
+                "totp": totp,
+                "passwords": passwords,
+                "recovery": recovery,
+            }, f)
+        os.chmod(SESSION_FILE, 0o600)
+    except OSError:
+        pass
+
+
+def _load_session() -> bool:
+    global _session_password, _totp_cache, _passwords_cache, _recovery_cache
+    try:
+        with open(SESSION_FILE) as f:
+            data = json.load(f)
+        if time.time() >= data["expires"]:
+            os.unlink(SESSION_FILE)
+            return False
+        _session_password = data["password"]
+        _totp_cache = data.get("totp", {})
+        _passwords_cache = data.get("passwords", {})
+        _recovery_cache = data.get("recovery", {})
+        return True
+    except Exception:
+        return False
+
+
+def _clear_session():
+    try:
+        os.unlink(SESSION_FILE)
+    except Exception:
+        pass
 
 
 def _read_jkey(path: str) -> dict | None:
     if not os.path.exists(path):
         return None
-    with open(path, "r", encoding="utf-8") as f:
+    with open(path, "r") as f:
         return json.load(f)
 
 
 def _write_jkey(path: str, encrypted: dict):
     _ensure_dir()
     tmp = path + ".tmp"
-    with open(tmp, "w", encoding="utf-8") as f:
+    with open(tmp, "w") as f:
         json.dump(encrypted, f, indent=4, ensure_ascii=False)
     os.replace(tmp, path)
 
@@ -66,6 +109,7 @@ def _unlock_all(password: str) -> bool:
     _passwords_cache = _decrypt_file(PASSWORDS_FILE, password) or {}
     _recovery_cache = _decrypt_file(RECOVERY_FILE, password) or {}
     _session_password = password
+    _save_session(password, data, _passwords_cache, _recovery_cache)
     return True
 
 
@@ -82,6 +126,8 @@ def _ensure_unlocked():
     if not os.path.exists(TOTP_FILE):
         print("Error: Vault not initialized. Run 'jkey pv init' first.")
         return False
+    if _load_session():
+        return True
     pw = _password_from_env()
     if pw and _unlock_all(pw):
         return True
@@ -104,6 +150,7 @@ def lock():
     _totp_cache = None
     _passwords_cache = None
     _recovery_cache = None
+    _clear_session()
 
 
 def load_totp() -> dict | None:
@@ -118,11 +165,15 @@ def save_totp(data: dict):
         return
     _encrypt_file(TOTP_FILE, data, _session_password)
     _totp_cache = data
+    _save_session(_session_password, data, _passwords_cache, _recovery_cache)
 
 
 def load_passwords() -> dict | None:
     if not _ensure_unlocked():
         return None
+    global _passwords_cache
+    if _passwords_cache is None:
+        _passwords_cache = _decrypt_file(PASSWORDS_FILE, _session_password) or {}
     return _passwords_cache
 
 
@@ -132,11 +183,15 @@ def save_passwords(data: dict):
         return
     _encrypt_file(PASSWORDS_FILE, data, _session_password)
     _passwords_cache = data
+    _save_session(_session_password, _totp_cache, data, _recovery_cache)
 
 
 def load_recovery() -> dict | None:
     if not _ensure_unlocked():
         return None
+    global _recovery_cache
+    if _recovery_cache is None:
+        _recovery_cache = _decrypt_file(RECOVERY_FILE, _session_password) or {}
     return _recovery_cache
 
 
@@ -146,6 +201,7 @@ def save_recovery(data: dict):
         return
     _encrypt_file(RECOVERY_FILE, data, _session_password)
     _recovery_cache = data
+    _save_session(_session_password, _totp_cache, _passwords_cache, data)
 
 
 def save_qr_image(name: str, image_data: bytes):
@@ -181,110 +237,3 @@ def list_qr_images() -> list[str]:
         if f.endswith(".jkey"):
             names.append(f[:-5])
     return sorted(names)
-
-
-def encrypt_file(input_path: str, output_path: str | None = None):
-    if not os.path.exists(input_path):
-        print(f"Error: File not found: {input_path}")
-        return
-    if not _ensure_unlocked():
-        return
-    with open(input_path, "rb") as f:
-        raw = f.read()
-    encoded = base64.b64encode(raw).decode("ascii")
-    encrypted = aes.encrypt({"raw": encoded}, _session_password)
-    if output_path is None:
-        output_path = input_path + ".jkey"
-    _write_jkey(output_path, encrypted)
-    print(f"Encrypted: {output_path}")
-
-
-def decrypt_file(path: str, output_path: str | None = None):
-    if not os.path.exists(path):
-        print(f"Error: File not found: {path}")
-        return
-    if not _ensure_unlocked():
-        return
-    encrypted = _read_jkey(path)
-    if encrypted is None:
-        return
-    data = aes.decrypt(encrypted, _session_password)
-    if data is None:
-        print("Error: Decryption failed.")
-        return
-    if "raw" in data:
-        raw = base64.b64decode(data["raw"])
-    else:
-        raw = json.dumps(data, indent=4, ensure_ascii=False).encode("utf-8")
-    if output_path:
-        with open(output_path, "wb") as f:
-            f.write(raw)
-        print(f"Decrypted: {output_path}")
-    else:
-        if "raw" in data:
-            print("(binary data, use -o <file> to save)")
-        else:
-            print(raw.decode("utf-8"))
-
-
-def cmd_init():
-    if os.path.exists(TOTP_FILE):
-        print("Vault already exists. Use 'jkey pv set-pw' to change password.")
-        return
-    pw1 = _password_from_env()
-    if pw1 is None:
-        pw1 = _prompt_password("Set master password: ")
-        if not pw1:
-            print("Password cannot be empty.")
-            return
-        pw2 = _prompt_password("Confirm master password: ")
-        if pw1 != pw2:
-            print("Passwords do not match.")
-            return
-    _ensure_dir()
-    _encrypt_file(TOTP_FILE, {}, pw1)
-    _encrypt_file(PASSWORDS_FILE, {}, pw1)
-    _encrypt_file(RECOVERY_FILE, {}, pw1)
-    _unlock_all(pw1)
-    print(f"Vault initialized at {CONFIG_DIR}")
-
-
-def cmd_unlock():
-    if is_unlocked():
-        print("Vault is already unlocked.")
-        return
-    if not os.path.exists(TOTP_FILE):
-        print("Error: Vault not initialized. Run 'jkey pv init' first.")
-        return
-    if _ensure_unlocked():
-        print("Vault unlocked.")
-
-
-def cmd_lock():
-    if not is_unlocked():
-        print("Vault is already locked.")
-        return
-    lock()
-    print("Vault locked.")
-
-
-def cmd_set_pw():
-    if not os.path.exists(TOTP_FILE):
-        print("Error: Vault not initialized. Run 'jkey pv init' first.")
-        return
-    if not _ensure_unlocked():
-        return
-    pw1 = _prompt_password("New master password: ")
-    if not pw1:
-        print("Password cannot be empty.")
-        return
-    pw2 = _prompt_password("Confirm new master password: ")
-    if pw1 != pw2:
-        print("Passwords do not match.")
-        return
-    global _session_password
-    _encrypt_file(TOTP_FILE, _totp_cache, pw1)
-    _encrypt_file(PASSWORDS_FILE, _passwords_cache, pw1)
-    _encrypt_file(RECOVERY_FILE, _recovery_cache, pw1)
-    _session_password = pw1
-    print("Master password changed.")
