@@ -62,14 +62,14 @@ def _load_session() -> bool:
         _passwords_cache = data.get("passwords", {})
         _recovery_cache = data.get("recovery", {})
         return True
-    except Exception:
+    except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return False
 
 
 def _clear_session():
     try:
         os.unlink(SESSION_FILE)
-    except Exception:
+    except OSError:
         pass
 
 
@@ -156,6 +156,24 @@ def lock():
     _clear_session()
 
 
+def change_master_password(new_password: str) -> bool:
+    """Re-encrypt all vault data with a new master password."""
+    global _session_password
+    if _session_password is None:
+        return False
+    totp = _totp_cache
+    if totp is None:
+        return False
+    passwords = _passwords_cache
+    recovery = _recovery_cache
+    _encrypt_file(TOTP_FILE, totp, new_password)
+    _encrypt_file(PASSWORDS_FILE, passwords if passwords is not None else {}, new_password)
+    _encrypt_file(RECOVERY_FILE, recovery if recovery is not None else {}, new_password)
+    _session_password = new_password
+    _save_session(new_password, totp, passwords, recovery)
+    return True
+
+
 def load_totp() -> dict | None:
     if not _ensure_unlocked():
         return None
@@ -164,55 +182,59 @@ def load_totp() -> dict | None:
 
 def save_totp(data: dict):
     global _totp_cache
-    if _session_password is None:
+    pw = _session_password
+    if pw is None:
         return
-    _encrypt_file(TOTP_FILE, data, _session_password)
+    _encrypt_file(TOTP_FILE, data, pw)
     _totp_cache = data
-    _save_session(_session_password, data, _passwords_cache, _recovery_cache)
+    _save_session(pw, data, _passwords_cache, _recovery_cache)
 
 
 def load_passwords() -> dict | None:
     if not _ensure_unlocked():
         return None
     global _passwords_cache
-    if _passwords_cache is None:
+    if _passwords_cache is None and _session_password is not None:
         _passwords_cache = _decrypt_file(PASSWORDS_FILE, _session_password) or {}
     return _passwords_cache
 
 
 def save_passwords(data: dict):
     global _passwords_cache
-    if _session_password is None:
+    pw = _session_password
+    if pw is None:
         return
-    _encrypt_file(PASSWORDS_FILE, data, _session_password)
+    _encrypt_file(PASSWORDS_FILE, data, pw)
     _passwords_cache = data
-    _save_session(_session_password, _totp_cache, data, _recovery_cache)
+    _save_session(pw, _totp_cache, data, _recovery_cache)
 
 
 def load_recovery() -> dict | None:
     if not _ensure_unlocked():
         return None
     global _recovery_cache
-    if _recovery_cache is None:
+    if _recovery_cache is None and _session_password is not None:
         _recovery_cache = _decrypt_file(RECOVERY_FILE, _session_password) or {}
     return _recovery_cache
 
 
 def save_recovery(data: dict):
     global _recovery_cache
-    if _session_password is None:
+    pw = _session_password
+    if pw is None:
         return
-    _encrypt_file(RECOVERY_FILE, data, _session_password)
+    _encrypt_file(RECOVERY_FILE, data, pw)
     _recovery_cache = data
-    _save_session(_session_password, _totp_cache, _passwords_cache, data)
+    _save_session(pw, _totp_cache, _passwords_cache, data)
 
 
 def save_qr_image(name: str, image_data: bytes):
-    if _session_password is None:
+    pw = _session_password
+    if pw is None:
         return
     _ensure_dir()
     encoded = base64.b64encode(image_data).decode("ascii")
-    encrypted = aes.encrypt({"raw": encoded}, _session_password)
+    encrypted = aes.encrypt({"raw": encoded}, pw)
     path = os.path.join(QR_DIR, f"{name}.jkey")
     _write_jkey(path, encrypted)
 
@@ -220,13 +242,16 @@ def save_qr_image(name: str, image_data: bytes):
 def load_qr_image(name: str) -> bytes | None:
     if not _ensure_unlocked():
         return None
+    pw = _session_password
+    if pw is None:
+        return None
     path = os.path.join(QR_DIR, f"{name}.jkey")
     if not os.path.exists(path):
         return None
     encrypted = _read_jkey(path)
     if encrypted is None:
         return None
-    data = aes.decrypt(encrypted, _session_password)
+    data = aes.decrypt(encrypted, pw)
     if data is None or "raw" not in data:
         return None
     return base64.b64decode(data["raw"])

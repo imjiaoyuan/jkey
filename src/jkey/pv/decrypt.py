@@ -12,10 +12,13 @@ def decrypt_file(path: str, output_path: str | None = None):
         return
     if not core._ensure_unlocked():
         return
+    pw = core._session_password
+    if pw is None:
+        return
     encrypted = core._read_jkey(path)
     if encrypted is None:
         return
-    data = aes.decrypt(encrypted, core._session_password)
+    data = aes.decrypt(encrypted, pw)
     if data is None:
         print("Error: Decryption failed.")
         return
