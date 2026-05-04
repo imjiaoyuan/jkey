@@ -1,4 +1,3 @@
-import pytest
 
 
 class TestRcAdd:
@@ -116,7 +115,7 @@ class Test2faRemove:
         import importlib
 
         remove_account = importlib.import_module("jkey.2fa.rm").remove_account
-        from jkey.pv.core import load_totp, load_recovery, save_totp, save_recovery
+        from jkey.pv.core import load_recovery, load_totp, save_recovery, save_totp
 
         save_totp({"test@example.com": "JBSWY3DPEHPK3PXP"})
         save_recovery({"test@example.com": ["rc1"]})
