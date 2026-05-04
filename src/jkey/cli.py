@@ -1,8 +1,8 @@
 import argparse
 import importlib
 import sys
+from importlib.metadata import version
 
-from jkey.__about__ import __version__
 from jkey.pm.core import (
     add_password,
     delete_password,
@@ -20,7 +20,7 @@ def main():
         prog="jkey",
         description="Python library for password management and TOTP verification",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {__version__}")
+    parser.add_argument("--version", action="version", version=f"%(prog)s {version('jkey')}")
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("2fa", help="Manage TOTP 2FA accounts")
