@@ -1,7 +1,6 @@
 import os
 
 from jkey.pv.core import (
-    TOTP_FILE,
     _encrypt_file,
     _ensure_dir,
     _password_from_env,
@@ -11,6 +10,8 @@ from jkey.pv.core import (
 
 
 def cmd_init():
+    from jkey.pv.core import CONFIG_DIR, PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE
+
     if os.path.exists(TOTP_FILE):
         print("Vault already exists. Use 'jkey pv set-pw' to change password.")
         return
@@ -24,7 +25,6 @@ def cmd_init():
         if pw1 != pw2:
             print("Passwords do not match.")
             return
-    from jkey.pv.core import CONFIG_DIR, PASSWORDS_FILE, RECOVERY_FILE
 
     _ensure_dir()
     _encrypt_file(TOTP_FILE, {}, pw1)

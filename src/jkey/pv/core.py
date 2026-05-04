@@ -76,8 +76,11 @@ def _clear_session():
 def _read_jkey(path: str) -> dict | None:
     if not os.path.exists(path):
         return None
-    with open(path, "r") as f:
-        return json.load(f)
+    try:
+        with open(path, "r") as f:
+            return json.load(f)
+    except Exception:
+        return None
 
 
 def _write_jkey(path: str, encrypted: dict):
