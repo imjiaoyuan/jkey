@@ -1,9 +1,11 @@
 import os
 
-from jkey.pv.core import TOTP_FILE, _ensure_unlocked, is_unlocked
+from jkey.pv.core import _ensure_unlocked, is_unlocked
 
 
 def cmd_unlock():
+    from jkey.pv.core import TOTP_FILE
+
     if is_unlocked():
         print("Vault is already unlocked.")
         return
