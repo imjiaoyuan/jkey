@@ -1,8 +1,8 @@
-import re
 
 import pytest
 
-from jkey.pm.gen import generate_password, _SYMBOLS as SYMBOLS
+from jkey.pm.gen import _SYMBOLS as SYMBOLS
+from jkey.pm.gen import generate_password
 
 
 class TestGeneratePassword:
@@ -46,7 +46,7 @@ class TestGeneratePassword:
 
     def test_no_symbols(self):
         pw = generate_password(length=32, symbols=False)
-        assert all(not (c in SYMBOLS) for c in pw)
+        assert all(c not in SYMBOLS for c in pw)
 
     def test_no_char_sets_raises(self):
         with pytest.raises(ValueError, match="At least one character set"):
@@ -59,11 +59,10 @@ class TestGeneratePassword:
     def test_uniqueness(self):
         """Multiple generations should produce different passwords."""
         passwords = {generate_password() for _ in range(20)}
-        assert len(passwords) >= 18  # Allow occasional collisions (unlikely)
+        assert len(passwords) >= 18
 
     def test_no_predictable_pattern(self):
         """Check that passwords don't have obvious patterns."""
         pw = generate_password(length=100)
-        # There should be no long repeating character runs
         for c in set(pw):
-            assert pw.count(c * 5) == 0, f"Found repeating run of '{c}'"
+            assert pw.count(c * 5) == 0
