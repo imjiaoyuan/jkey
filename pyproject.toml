@@ -1,7 +1,7 @@
 [project]
 name = "jkey"
 version = "0.1.0"
-description = "Password manager and TOTP verification tool"
+description = "Python library for password management and TOTP verification."
 readme = "README.md"
 requires-python = ">=3.14"
 authors = [{name = "jiaoyuan", email = "imjiaoyuan@gmail.com"}]
@@ -17,7 +17,7 @@ classifiers = [
 ]
 keywords = ["password", "totp", "2fa", "vault", "encryption"]
 dependencies = [
-    "opencv-python-headless>=4.13.0.92",
+    "opencv-python-headless>=4.9.0",
 ]
 
 [project.urls]
@@ -37,14 +37,13 @@ package = true
 [[tool.uv.index]]
 name = "tuna"
 url = "https://pypi.tuna.tsinghua.edu.cn/simple"
-default = true
 
 [tool.setuptools.packages.find]
 where = ["src"]
 include = ["jkey*"]
 
 [dependency-groups]
-dev = ["pytest>=8"]
+dev = ["pytest>=8", "ruff>=0.11"]
 
 [tool.ruff]
 line-length = 120
