@@ -1,14 +1,11 @@
 import os
 
-import pytest
-
 
 class TestCmdInit:
     def test_init_creates_vault(self, vault_dir, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda p="": "test-pw")
+        from jkey.pv.core import CONFIG_DIR, PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE
         from jkey.pv.init import cmd_init
-
-        from jkey.pv.core import CONFIG_DIR, TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE
 
         cmd_init()
         assert os.path.exists(TOTP_FILE)
@@ -97,9 +94,8 @@ class TestCmdLock:
         assert "already locked" in captured.out
 
     def test_lock_success(self, vault, capsys):
-        from jkey.pv.lock import cmd_lock
-
         from jkey.pv.core import is_unlocked
+        from jkey.pv.lock import cmd_lock
 
         cmd_lock()
         captured = capsys.readouterr()
@@ -116,10 +112,9 @@ class TestCmdSetPw:
         assert "not initialized" in captured.out
 
     def test_set_pw_success(self, vault, capsys, monkeypatch):
-        from jkey.pv.set_pw import cmd_set_pw
-
-        from jkey.pv.core import TOTP_FILE, _decrypt_file
         import jkey.pv.core as core
+        from jkey.pv.core import TOTP_FILE, _decrypt_file
+        from jkey.pv.set_pw import cmd_set_pw
 
         answers = iter(["new-password", "new-password"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
@@ -207,8 +202,8 @@ class TestCmdDecrypt:
     def test_decrypt_wrong_password(self, vault, tmp_path, capsys):
         """Test decrypt with wrong session password."""
         import jkey.pv.core as core
-        from jkey.pv.decrypt import decrypt_file
         from jkey import aes
+        from jkey.pv.decrypt import decrypt_file
 
         encrypted = aes.encrypt({"raw": "dGVzdA=="}, "correct")
 
@@ -244,9 +239,8 @@ class TestCmdExport:
 
     def test_export_passwords(self, vault, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda p="": "test-password")
-        from jkey.pv.export import cmd_export
-
         from jkey.pv.core import save_passwords
+        from jkey.pv.export import cmd_export
 
         save_passwords({"github": "gh_pass"})
         out = tmp_path / "passwords.csv"
@@ -259,9 +253,8 @@ class TestCmdExport:
 
     def test_export_recovery(self, vault, tmp_path, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda p="": "test-password")
-        from jkey.pv.export import cmd_export
-
         from jkey.pv.core import save_recovery
+        from jkey.pv.export import cmd_export
 
         save_recovery({"example": ["rc1"]})
         out = tmp_path / "recovery.txt"

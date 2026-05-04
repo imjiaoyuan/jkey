@@ -1,8 +1,6 @@
 import json
 import os
 
-import pytest
-
 from jkey import aes
 
 
@@ -25,7 +23,6 @@ class TestReadWriteJkey:
     def test_write_and_read(self, vault_dir):
         from jkey.pv.core import _read_jkey, _write_jkey
 
-        from jkey import aes
 
         data = {"hello": "world"}
         encrypted = aes.encrypt(data, "pw")
@@ -77,7 +74,7 @@ class TestSession:
 
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
         assert _load_session() is True
-        from jkey.pv.core import _session_password, _totp_cache, _passwords_cache, _recovery_cache
+        from jkey.pv.core import _passwords_cache, _recovery_cache, _session_password, _totp_cache
 
         assert _session_password == "pw"
         assert _totp_cache == {"a": 1}
@@ -90,9 +87,9 @@ class TestSession:
         assert _load_session() is False
 
     def test_expired_session(self, vault_dir):
-        from jkey.pv.core import _load_session, _save_session, SESSION_FILE
-
         import time
+
+        from jkey.pv.core import SESSION_FILE, _load_session, _save_session
 
         _save_session("pw", {}, {}, {})
         # Manually expire the session
@@ -105,7 +102,7 @@ class TestSession:
         assert not os.path.exists(SESSION_FILE)
 
     def test_corrupted_session(self, vault_dir):
-        from jkey.pv.core import _load_session, SESSION_FILE
+        from jkey.pv.core import SESSION_FILE, _load_session
 
         with open(SESSION_FILE, "w") as f:
             f.write("not json")
@@ -114,13 +111,13 @@ class TestSession:
 
 class TestUnlockAll:
     def test_success(self, vault_dir):
-        from jkey.pv.core import TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE, _encrypt_file, _unlock_all
+        from jkey.pv.core import PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE, _encrypt_file, _unlock_all
 
         _encrypt_file(TOTP_FILE, {"acc": "SECRET"}, "pw")
         _encrypt_file(PASSWORDS_FILE, {"site": "pass"}, "pw")
         _encrypt_file(RECOVERY_FILE, {"acc": ["rc1"]}, "pw")
         assert _unlock_all("pw") is True
-        from jkey.pv.core import _session_password, _totp_cache, _passwords_cache, _recovery_cache
+        from jkey.pv.core import _passwords_cache, _recovery_cache, _session_password, _totp_cache
 
         assert _session_password == "pw"
         assert _totp_cache == {"acc": "SECRET"}
@@ -168,7 +165,7 @@ class TestLockUnlockState:
         assert is_unlocked() is False
 
     def test_lock_clears_state(self, vault_dir):
-        from jkey.pv.core import _unlock_all, is_unlocked, lock
+        from jkey.pv.core import is_unlocked, lock
 
         lock()
         assert is_unlocked() is False
@@ -228,7 +225,7 @@ class TestLoadSaveRecovery:
 
 class TestQRImages:
     def test_save_and_load(self, vault):
-        from jkey.pv.core import list_qr_images, load_qr_image, save_qr_image
+        from jkey.pv.core import load_qr_image, save_qr_image
 
         save_qr_image("test", b"fake_image_data")
         loaded = load_qr_image("test")
