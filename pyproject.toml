@@ -23,7 +23,7 @@ build-backend = "setuptools.build_meta"
 where = ["src"]
 
 [dependency-groups]
-dev = ["pytest>=8", "ruff>=0.11"]
+dev = ["pytest>=8", "pytest-cov>=6", "ruff>=0.11"]
 
 [tool.ruff]
 line-length = 120
@@ -34,3 +34,13 @@ select = ["E", "F", "W", "I"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
+addopts = "--cov=src/jkey --cov-report=term-missing"
+
+[tool.coverage.run]
+source_pkgs = ["jkey"]
+
+[tool.coverage.report]
+exclude_lines = [
+    "if __name__ == .__main__.:",
+    "pragma: no cover",
+]
