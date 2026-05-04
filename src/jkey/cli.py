@@ -18,6 +18,9 @@ from jkey.pv.unlock import cmd_unlock
 scan_and_add = importlib.import_module('jkey.2fa.add').scan_and_add
 list_accounts = importlib.import_module('jkey.2fa.ls').list_accounts
 remove_account = importlib.import_module('jkey.2fa.rm').remove_account
+rc_add_file = importlib.import_module('jkey.rc.add').rc_add_file
+rc_list = importlib.import_module('jkey.rc.ls').rc_list
+rc_remove = importlib.import_module('jkey.rc.rm').rc_remove
 
 
 def main():
@@ -25,7 +28,7 @@ def main():
         prog="jkey",
         description="Python library for password management and TOTP verification",
     )
-    parser.add_argument("--version", action="version", version=f"%(prog)s {version('jkey')}")
+    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {version('jkey')}")
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("2fa", help="Manage TOTP 2FA accounts")
@@ -34,8 +37,16 @@ def main():
     a.add_argument("keyword", nargs="?", default=None)
     a = p2.add_parser("add", help="Import from QR code image")
     a.add_argument("image_path")
-    a.add_argument("--recovery")
     a = p2.add_parser("rm", help="Remove account")
+    a.add_argument("account")
+
+    p = sub.add_parser("rc", help="Manage recovery codes")
+    p2 = p.add_subparsers(dest="action")
+    a = p2.add_parser("add", help="Import recovery codes from file")
+    a.add_argument("file_path")
+    a = p2.add_parser("ls", help="List recovery codes")
+    a.add_argument("keyword", nargs="?", default=None)
+    a = p2.add_parser("rm", help="Remove recovery codes")
     a.add_argument("account")
 
     p = sub.add_parser("pm", help="Manage passwords")
@@ -76,6 +87,8 @@ def main():
 
     if args.command == "2fa":
         _2fa(args)
+    elif args.command == "rc":
+        _rc(args)
     elif args.command == "pm":
         _pm(args)
     elif args.command == "pv":
@@ -87,11 +100,23 @@ def _2fa(args):
     if a == "ls":
         list_accounts(args.keyword)
     elif a == "add":
-        scan_and_add(args.image_path, args.recovery)
+        scan_and_add(args.image_path)
     elif a == "rm":
         remove_account(args.account)
     else:
         print("Usage: jkey 2fa ls|add|rm")
+
+
+def _rc(args):
+    a = args.action
+    if a == "add":
+        rc_add_file(args.file_path)
+    elif a == "ls":
+        rc_list(args.keyword)
+    elif a == "rm":
+        rc_remove(args.account)
+    else:
+        print("Usage: jkey rc add|ls|rm")
 
 
 def _pm(args):

@@ -5,8 +5,6 @@ import cv2
 
 from jkey.pv.core import load_totp, save_qr_image, save_totp
 
-from .core import _import_recovery_file
-
 
 def _resize_if_large(img, max_size=1000):
     h, w = img.shape[:2]
@@ -17,7 +15,7 @@ def _resize_if_large(img, max_size=1000):
     return img
 
 
-def scan_and_add(image_path: str, recovery_path: str | None = None):
+def scan_and_add(image_path: str):
     if not os.path.exists(image_path):
         print(f"Error: File not found: {image_path}")
         return
@@ -69,5 +67,3 @@ def scan_and_add(image_path: str, recovery_path: str | None = None):
         save_qr_image(name, cv2.imencode(".jpg", img)[1].tobytes())
     except Exception:
         pass
-
-    _import_recovery_file(name, recovery_path)
