@@ -1,6 +1,6 @@
 # jkey
 
-Password manager and TOTP verification tool for the command line.
+Python library for password management and TOTP verification.
 
 ## Install
 
