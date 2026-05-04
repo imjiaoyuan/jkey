@@ -5,10 +5,7 @@ import os
 import struct
 import time
 
-from jkey.pv.core import load_totp, save_totp, load_recovery, save_recovery
-
-
-# ── TOTP algorithm (RFC 6238) ──
+from jkey.pv.core import load_recovery, load_totp, save_recovery, save_totp
 
 
 def _hotp(secret: bytes, counter: int, digits: int = 6) -> str:
@@ -39,9 +36,6 @@ def totp(secret_key: str, digits: int = 6, interval: int = 30) -> str:
     secret = _b32_decode(secret_key)
     counter = int(time.time()) // interval
     return _hotp(secret, counter, digits)
-
-
-# ── Account management ──
 
 
 def _import_recovery_file(account: str, recovery_path: str | None):
