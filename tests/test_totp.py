@@ -1,8 +1,5 @@
 import importlib
-import struct
 import time
-
-import pytest
 
 _core = importlib.import_module("jkey.2fa.core")
 _hotp = _core._hotp
