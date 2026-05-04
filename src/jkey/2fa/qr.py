@@ -1,10 +1,10 @@
 import importlib
 import os
-from urllib.parse import urlparse, parse_qs, unquote
+from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
 
-from jkey.pv.core import load_totp, save_totp, save_qr_image
+from jkey.pv.core import load_totp, save_qr_image, save_totp
 
 _core = importlib.import_module("jkey.2fa.core")
 _import_recovery_file = _core._import_recovery_file
