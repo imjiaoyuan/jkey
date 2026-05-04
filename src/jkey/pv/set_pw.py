@@ -17,9 +17,5 @@ def cmd_set_pw():
     if pw1 != pw2:
         print("Passwords do not match.")
         return
-    core._encrypt_file(core.TOTP_FILE, core._totp_cache, pw1)
-    core._encrypt_file(core.PASSWORDS_FILE, core._passwords_cache, pw1)
-    core._encrypt_file(core.RECOVERY_FILE, core._recovery_cache, pw1)
-    core._session_password = pw1
-    core._save_session(pw1, core._totp_cache, core._passwords_cache, core._recovery_cache)
-    print("Master password changed.")
+    if core.change_master_password(pw1):
+        print("Master password changed.")
