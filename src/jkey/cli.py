@@ -4,10 +4,14 @@ import sys
 
 from jkey.__about__ import __version__
 from jkey.pm.core import (
-    list_passwords, add_password, delete_password, show_password, import_from_csv,
+    add_password,
+    delete_password,
+    import_from_csv,
+    list_passwords,
+    show_password,
 )
 from jkey.pm.gen import generate_password
-from jkey.pv.core import cmd_init, cmd_unlock, cmd_lock, cmd_set_pw, encrypt_file, decrypt_file
+from jkey.pv.core import cmd_init, cmd_lock, cmd_set_pw, cmd_unlock, decrypt_file, encrypt_file
 from jkey.pv.export import cmd_export
 
 

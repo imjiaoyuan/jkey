@@ -52,7 +52,12 @@ def _gf_mul(a, b):
 
 
 def _sub_word(word):
-    return (SBOX[(word >> 24) & 0xff] << 24) | (SBOX[(word >> 16) & 0xff] << 16) | (SBOX[(word >> 8) & 0xff] << 8) | SBOX[word & 0xff]
+    return (
+        (SBOX[(word >> 24) & 0xff] << 24)
+        | (SBOX[(word >> 16) & 0xff] << 16)
+        | (SBOX[(word >> 8) & 0xff] << 8)
+        | SBOX[word & 0xff]
+    )
 
 
 def _rot_word(word):
@@ -227,7 +232,6 @@ def derive_key(password: str, salt: bytes, dklen: int = KEY_LENGTH) -> bytes:
 def encrypt(data: dict, password: str) -> dict:
     salt = os.urandom(SALT_LENGTH)
     iv = os.urandom(IV_LENGTH)
-    # Derive 64 bytes, split into separate encryption and MAC keys
     derived = derive_key(password, salt, dklen=64)
     enc_key = derived[:32]
     mac_key = derived[32:]
@@ -251,7 +255,7 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         ciphertext = base64.b64decode(encrypted["data"])
         stored_mac = base64.b64decode(encrypted["mac"])
     except Exception:
-        return None  # Malformed data structure
+        return None
 
     version = encrypted.get("version", 1)
     if version >= 3:
@@ -259,7 +263,6 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         enc_key = derived[:32]
         mac_key = derived[32:]
     else:
-        # v1/v2: single key for both encryption and MAC
         enc_key = derive_key(password, salt)
         mac_key = enc_key
 

@@ -1,13 +1,18 @@
 import csv
+import getpass
 import io
 import json
 import os
-import getpass
 
 from jkey.pv.core import (
-    load_totp, load_passwords, load_recovery,
-    _ensure_unlocked, verify_password, _password_from_env,
-    list_qr_images, load_qr_image,
+    _ensure_unlocked,
+    _password_from_env,
+    list_qr_images,
+    load_passwords,
+    load_qr_image,
+    load_recovery,
+    load_totp,
+    verify_password,
 )
 
 

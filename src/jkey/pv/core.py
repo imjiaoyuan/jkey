@@ -1,7 +1,7 @@
+import base64
+import getpass
 import json
 import os
-import getpass
-import base64
 
 from jkey import aes
 
@@ -106,9 +106,6 @@ def lock():
     _recovery_cache = None
 
 
-# ── Per-type load/save ──
-
-
 def load_totp() -> dict | None:
     if not _ensure_unlocked():
         return None
@@ -151,9 +148,6 @@ def save_recovery(data: dict):
     _recovery_cache = data
 
 
-# ── QR image storage ──
-
-
 def save_qr_image(name: str, image_data: bytes):
     if _session_password is None:
         return
@@ -187,9 +181,6 @@ def list_qr_images() -> list[str]:
         if f.endswith(".jkey"):
             names.append(f[:-5])
     return sorted(names)
-
-
-# ── Encrypt/Decrypt any file ──
 
 
 def encrypt_file(input_path: str, output_path: str | None = None):
@@ -234,9 +225,6 @@ def decrypt_file(path: str, output_path: str | None = None):
             print("(binary data, use -o <file> to save)")
         else:
             print(raw.decode("utf-8"))
-
-
-# ── Commands ──
 
 
 def cmd_init():
