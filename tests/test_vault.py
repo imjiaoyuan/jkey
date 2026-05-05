@@ -16,7 +16,7 @@ class TestEnsureDir:
         from jkey.pv.core import _ensure_dir
 
         _ensure_dir()
-        _ensure_dir()  # should not raise
+        _ensure_dir()
 
 
 class TestReadWriteJkey:
@@ -87,19 +87,26 @@ class TestSession:
         assert _load_session() is False
 
     def test_expired_session(self, vault_dir):
-        import time
+        import jkey.pv.core as core
 
-        from jkey.pv.core import SESSION_FILE, _load_session, _save_session
+        core._save_session("pw", {}, {}, {})
+        now = core.time.time()
+        from unittest.mock import patch
 
-        _save_session("pw", {}, {}, {})
-        # Manually expire the session
+        with patch("jkey.pv.core.time.time", return_value=now + core.SESSION_TIMEOUT + 1):
+            assert core._load_session() is False
+        assert not os.path.exists(core.SESSION_FILE)
+
+    def test_session_file_not_plaintext(self, vault_dir):
+        from jkey.pv.core import SESSION_FILE, _save_session
+
+        _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
         with open(SESSION_FILE) as f:
-            data = json.load(f)
-        data["expires"] = time.time() - 1
-        with open(SESSION_FILE, "w") as f:
-            json.dump(data, f)
-        assert _load_session() is False
-        assert not os.path.exists(SESSION_FILE)
+            raw = json.load(f)
+        assert "session" in raw
+        dumped = json.dumps(raw)
+        assert "\"password\"" not in dumped
+        assert "\"totp\"" not in dumped
 
     def test_corrupted_session(self, vault_dir):
         from jkey.pv.core import SESSION_FILE, _load_session
@@ -251,7 +258,7 @@ class TestQRImages:
     def test_save_when_locked(self, vault_dir):
         from jkey.pv.core import save_qr_image
 
-        save_qr_image("test", b"data")  # should not raise
+        save_qr_image("test", b"data")
 
 
 class TestEnsureUnlocked:

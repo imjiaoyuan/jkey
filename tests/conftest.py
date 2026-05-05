@@ -16,7 +16,6 @@ def vault_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "QR_DIR", os.path.join(d, "qr"))
     monkeypatch.setattr(core, "SESSION_FILE", os.path.join(d, ".session"))
     yield tmp_path
-    # Reset module globals
     core._session_password = None
     core._totp_cache = None
     core._passwords_cache = None

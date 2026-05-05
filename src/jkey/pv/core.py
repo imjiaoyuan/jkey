@@ -1,6 +1,9 @@
 import base64
+import hashlib
 import json
 import os
+import socket
+import sys
 import time
 
 from jkey import aes
@@ -19,6 +22,22 @@ _passwords_cache: dict | None = None
 _recovery_cache: dict | None = None
 
 
+def _session_secret() -> str:
+    machine_id = ""
+    for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                machine_id = f.read().strip()
+                if machine_id:
+                    break
+        except OSError:
+            continue
+    if not machine_id:
+        machine_id = socket.gethostname()
+    material = f"{os.getuid()}:{machine_id}:{CONFIG_DIR}"
+    return hashlib.sha256(material.encode("utf-8")).hexdigest()
+
+
 def _ensure_dir():
     os.makedirs(CONFIG_DIR, exist_ok=True)
     os.makedirs(QR_DIR, exist_ok=True)
@@ -35,25 +54,32 @@ def _prompt_password(prompt: str = "Master password: ") -> str:
 
 def _save_session(password, totp, passwords, recovery):
     _ensure_dir()
+    payload = {
+        "expires": time.time() + SESSION_TIMEOUT,
+        "password": password,
+        "totp": totp,
+        "passwords": passwords,
+        "recovery": recovery,
+    }
     try:
         with open(SESSION_FILE, "w") as f:
-            json.dump({
-                "expires": time.time() + SESSION_TIMEOUT,
-                "password": password,
-                "totp": totp,
-                "passwords": passwords,
-                "recovery": recovery,
-            }, f)
+            json.dump({"session": aes.encrypt(payload, _session_secret())}, f)
         os.chmod(SESSION_FILE, 0o600)
-    except OSError:
-        pass
+    except OSError as e:
+        print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
 
 
 def _load_session() -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
     try:
         with open(SESSION_FILE) as f:
-            data = json.load(f)
+            raw = json.load(f)
+        if isinstance(raw, dict) and "session" in raw:
+            data = aes.decrypt(raw["session"], _session_secret())
+            if data is None:
+                return False
+        else:
+            data = raw
         if time.time() >= data["expires"]:
             os.unlink(SESSION_FILE)
             return False
@@ -69,8 +95,10 @@ def _load_session() -> bool:
 def _clear_session():
     try:
         os.unlink(SESSION_FILE)
-    except OSError:
+    except FileNotFoundError:
         pass
+    except OSError as e:
+        print(f"Warning: failed to clear session cache: {e}", file=sys.stderr)
 
 
 def _read_jkey(path: str) -> dict | None:
