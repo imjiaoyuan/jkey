@@ -5,7 +5,7 @@ description = "Python library for password management and TOTP verification."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "jiaoyuan", email = "imjiaoyuan@gmail.com"}]
-license = {text = "MIT"}
+license = "MIT"
 dependencies = ["opencv-python-headless>=4.9.0"]
 
 [project.urls]
