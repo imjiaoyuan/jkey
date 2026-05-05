@@ -122,7 +122,6 @@ class TestCmdSetPw:
         captured = capsys.readouterr()
         assert "changed" in captured.out
         assert core._session_password == "new-password"
-        # Verify old password no longer works
         assert _decrypt_file(TOTP_FILE, "test-password") is None
         assert _decrypt_file(TOTP_FILE, "new-password") is not None
 
@@ -184,7 +183,7 @@ class TestCmdDecrypt:
         input_path.write_text("hello world")
         encrypted_path = tmp_path / "secret.txt.jkey"
         encrypt_file(str(input_path), str(encrypted_path))
-        capsys.readouterr()  # discard encrypt output
+        capsys.readouterr()
 
         out = tmp_path / "decrypted.txt"
         decrypt_file(str(encrypted_path), str(out))
@@ -234,7 +233,6 @@ class TestCmdExport:
 
         cmd_export(Args())
         captured = capsys.readouterr()
-        # Should print JSON to stdout
         assert "{" in captured.out or "Warning" in captured.out
 
     def test_export_passwords(self, vault, tmp_path, capsys, monkeypatch):

@@ -1,4 +1,5 @@
 import os
+import sys
 from urllib.parse import parse_qs, unquote, urlparse
 
 import cv2
@@ -65,5 +66,5 @@ def scan_and_add(image_path: str):
 
     try:
         save_qr_image(name, cv2.imencode(".jpg", img)[1].tobytes())
-    except Exception:
-        pass
+    except Exception as e:
+        print(f"Warning: failed to save encrypted QR backup for '{name}': {e}", file=sys.stderr)

@@ -77,7 +77,6 @@ class TestRcList:
         from jkey.rc.add import rc_add_file
         from jkey.rc.ls import rc_list
 
-        # Add some recovery data first
         f = tmp_path / "myaccount.txt"
         f.write_text("rc1\nrc2\n")
         rc_add_file(str(f))
@@ -123,7 +122,6 @@ class Test2faRemove:
         remove_account("test@example.com")
         captured = capsys.readouterr()
         assert "Removed" in captured.out
-        # Verify both totp and recovery are cleared
         assert load_totp() == {}
         assert load_recovery() == {}
 
