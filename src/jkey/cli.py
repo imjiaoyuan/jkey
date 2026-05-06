@@ -1,26 +1,6 @@
 import argparse
-import importlib
 import sys
 from importlib.metadata import version
-
-from jkey.pm.add import add_password
-from jkey.pm.get import generate_password
-from jkey.pm.ls import list_passwords
-from jkey.pm.rm import delete_password
-from jkey.pv.decrypt import decrypt_file
-from jkey.pv.encrypt import encrypt_file
-from jkey.pv.export import cmd_export
-from jkey.pv.init import cmd_init
-from jkey.pv.lock import cmd_lock
-from jkey.pv.set_pw import cmd_set_pw
-from jkey.pv.unlock import cmd_unlock
-
-scan_and_add = importlib.import_module('jkey.2fa.add').scan_and_add
-list_accounts = importlib.import_module('jkey.2fa.ls').list_accounts
-remove_account = importlib.import_module('jkey.2fa.rm').remove_account
-rc_add_file = importlib.import_module('jkey.rc.add').rc_add_file
-rc_list = importlib.import_module('jkey.rc.ls').rc_list
-rc_remove = importlib.import_module('jkey.rc.rm').rc_remove
 
 
 def main():
@@ -96,36 +76,42 @@ def main():
 
 
 def _2fa(args):
+    import importlib
+
     a = args.action
     if a == "ls":
-        list_accounts(args.keyword)
+        importlib.import_module("jkey.2fa.ls").list_accounts(args.keyword)
     elif a == "add":
-        scan_and_add(args.image_path)
+        importlib.import_module("jkey.2fa.add").scan_and_add(args.image_path)
     elif a == "rm":
-        remove_account(args.account)
+        importlib.import_module("jkey.2fa.rm").remove_account(args.account)
     else:
         print("Usage: jkey 2fa ls|add|rm")
 
 
 def _rc(args):
+    import importlib
+
     a = args.action
     if a == "add":
-        rc_add_file(args.file_path)
+        importlib.import_module("jkey.rc.add").rc_add_file(args.file_path)
     elif a == "ls":
-        rc_list(args.keyword)
+        importlib.import_module("jkey.rc.ls").rc_list(args.keyword)
     elif a == "rm":
-        rc_remove(args.account)
+        importlib.import_module("jkey.rc.rm").rc_remove(args.account)
     else:
         print("Usage: jkey rc add|ls|rm")
 
 
 def _pm(args):
+    import importlib
+
     a = args.action
     if a == "ls":
-        list_passwords(args.keyword)
+        importlib.import_module("jkey.pm.ls").list_passwords(args.keyword)
     elif a == "get":
         try:
-            pwd = generate_password(
+            pwd = importlib.import_module("jkey.pm.get").generate_password(
                 length=args.length,
                 uppercase=not args.no_upper,
                 lowercase=not args.no_lower,
@@ -137,28 +123,30 @@ def _pm(args):
             print(f"Error: {e}")
             sys.exit(1)
     elif a == "add":
-        add_password(args.name)
+        importlib.import_module("jkey.pm.add").add_password(args.name)
     elif a == "rm":
-        delete_password(args.name)
+        importlib.import_module("jkey.pm.rm").delete_password(args.name)
     else:
         print("Usage: jkey pm ls|get|add|rm")
 
 
 def _pv(args):
+    import importlib
+
     a = args.action
     if a == "init":
-        cmd_init()
+        importlib.import_module("jkey.pv.init").cmd_init()
     elif a == "unlock":
-        cmd_unlock()
+        importlib.import_module("jkey.pv.unlock").cmd_unlock()
     elif a == "lock":
-        cmd_lock()
+        importlib.import_module("jkey.pv.lock").cmd_lock()
     elif a == "set-pw":
-        cmd_set_pw()
+        importlib.import_module("jkey.pv.set_pw").cmd_set_pw()
     elif a == "encrypt":
-        encrypt_file(args.input, args.output)
+        importlib.import_module("jkey.pv.encrypt").encrypt_file(args.input, args.output)
     elif a == "decrypt":
-        decrypt_file(args.input, args.output)
+        importlib.import_module("jkey.pv.decrypt").decrypt_file(args.input, args.output)
     elif a == "export":
-        cmd_export(args)
+        importlib.import_module("jkey.pv.export").cmd_export(args)
     else:
         print("Usage: jkey pv init|unlock|lock|set-pw|encrypt|decrypt|export")
