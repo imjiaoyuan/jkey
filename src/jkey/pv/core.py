@@ -2,13 +2,18 @@ import base64
 import hashlib
 import json
 import os
+import platform
 import socket
 import sys
 import time
 
 from jkey import aes
 
-CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "jkey")
+if platform.system() == "Windows":
+    _config_base = os.environ.get("APPDATA", os.path.expanduser("~"))
+    CONFIG_DIR = os.path.join(_config_base, "jkey")
+else:
+    CONFIG_DIR = os.path.join(os.path.expanduser("~"), ".config", "jkey")
 TOTP_FILE = os.path.join(CONFIG_DIR, "totp.jkey")
 PASSWORDS_FILE = os.path.join(CONFIG_DIR, "passwords.jkey")
 RECOVERY_FILE = os.path.join(CONFIG_DIR, "recovery.jkey")
@@ -16,10 +21,27 @@ QR_DIR = os.path.join(CONFIG_DIR, "qr")
 SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
 SESSION_TIMEOUT = 300
 
+_INVALID_FS_CHARS = '<>:"/\\|?*'
+
+
+def _sanitize_filename(name: str) -> str:
+    for ch in _INVALID_FS_CHARS:
+        name = name.replace(ch, "_")
+    return name
+
 _session_password: str | None = None
 _totp_cache: dict | None = None
 _passwords_cache: dict | None = None
 _recovery_cache: dict | None = None
+
+
+def _user_identifier() -> str:
+    if platform.system() == "Windows":
+        return os.environ.get("USERNAME", "unknown")
+    try:
+        return str(os.getuid())
+    except AttributeError:
+        return "unknown"
 
 
 def _session_secret() -> str:
@@ -34,7 +56,7 @@ def _session_secret() -> str:
             continue
     if not machine_id:
         machine_id = socket.gethostname()
-    material = f"{os.getuid()}:{machine_id}:{CONFIG_DIR}"
+    material = f"{_user_identifier()}:{machine_id}:{CONFIG_DIR}"
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -256,6 +278,10 @@ def save_recovery(data: dict):
     _save_session(pw, _totp_cache, _passwords_cache, data)
 
 
+def _qr_path(name: str) -> str:
+    return os.path.join(QR_DIR, f"{_sanitize_filename(name)}.jkey")
+
+
 def save_qr_image(name: str, image_data: bytes):
     pw = _session_password
     if pw is None:
@@ -263,8 +289,7 @@ def save_qr_image(name: str, image_data: bytes):
     _ensure_dir()
     encoded = base64.b64encode(image_data).decode("ascii")
     encrypted = aes.encrypt({"raw": encoded}, pw)
-    path = os.path.join(QR_DIR, f"{name}.jkey")
-    _write_jkey(path, encrypted)
+    _write_jkey(_qr_path(name), encrypted)
 
 
 def load_qr_image(name: str) -> bytes | None:
@@ -273,9 +298,12 @@ def load_qr_image(name: str) -> bytes | None:
     pw = _session_password
     if pw is None:
         return None
-    path = os.path.join(QR_DIR, f"{name}.jkey")
+    path = _qr_path(name)
     if not os.path.exists(path):
-        return None
+        legacy = os.path.join(QR_DIR, f"{name}.jkey")
+        if not os.path.exists(legacy):
+            return None
+        path = legacy
     encrypted = _read_jkey(path)
     if encrypted is None:
         return None
