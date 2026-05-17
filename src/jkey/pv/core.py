@@ -61,8 +61,8 @@ def _session_secret() -> str:
 
 
 def _ensure_dir():
-    os.makedirs(CONFIG_DIR, exist_ok=True)
-    os.makedirs(QR_DIR, exist_ok=True)
+    os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
+    os.makedirs(QR_DIR, mode=0o700, exist_ok=True)
 
 
 def _password_from_env() -> str | None:
@@ -136,7 +136,8 @@ def _read_jkey(path: str) -> dict | None:
 def _write_jkey(path: str, encrypted: dict):
     _ensure_dir()
     tmp = path + ".tmp"
-    with open(tmp, "w") as f:
+    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    with os.fdopen(fd, "w") as f:
         json.dump(encrypted, f, indent=4, ensure_ascii=False)
     os.replace(tmp, path)
 
