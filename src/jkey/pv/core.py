@@ -185,7 +185,9 @@ def _ensure_unlocked():
     pw = _password_from_env()
     if pw and _unlock_all(pw):
         return True
-    for _ in range(3):
+    for attempt in range(3):
+        if attempt > 0:
+            time.sleep(2 ** attempt)
         pw = _prompt_password()
         if _unlock_all(pw):
             return True
