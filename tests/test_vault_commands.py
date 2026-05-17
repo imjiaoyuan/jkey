@@ -3,7 +3,8 @@ import os
 
 class TestCmdInit:
     def test_init_creates_vault(self, vault_dir, monkeypatch):
-        monkeypatch.setattr("getpass.getpass", lambda p="": "test-pw")
+        monkeypatch.setattr("getpass.getpass", lambda p="": "StrongPassword123!")
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
         from jkey.pv.core import CONFIG_DIR, PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE
         from jkey.pv.init import cmd_init
 
@@ -17,7 +18,8 @@ class TestCmdInit:
         assert is_unlocked() is True
 
     def test_init_already_exists(self, vault_dir, capsys, monkeypatch):
-        monkeypatch.setattr("getpass.getpass", lambda p="": "test-pw")
+        monkeypatch.setattr("getpass.getpass", lambda p="": "StrongPassword123!")
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
         from jkey.pv.init import cmd_init
 
         cmd_init()
@@ -41,8 +43,9 @@ class TestCmdInit:
         """Test that password confirmation mismatch aborts."""
         from jkey.pv.init import cmd_init
 
-        answers = iter(["password1", "password2"])
+        answers = iter(["StrongPassword123!", "DifferentPassword456!"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
         cmd_init()
         captured = capsys.readouterr()
         assert "do not match" in captured.out
