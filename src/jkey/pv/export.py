@@ -40,6 +40,7 @@ def cmd_export(args):
         if output:
             with open(output, "w", encoding="utf-8") as f:
                 f.write(out)
+            os.chmod(output, 0o600)
             print(f"Exported TOTP secrets to {output}")
         else:
             print(out, end="")
@@ -57,6 +58,7 @@ def cmd_export(args):
         if output:
             with open(output, "w", encoding="utf-8", newline="") as f:
                 f.write(out)
+            os.chmod(output, 0o600)
             print(f"Exported passwords to {output}")
         else:
             print(out, end="")
@@ -76,6 +78,7 @@ def cmd_export(args):
             with open(output, "w", encoding="utf-8") as f:
                 f.write(out)
                 f.write("\n")
+            os.chmod(output, 0o600)
             print(f"Exported recovery codes to {output}")
         else:
             print(out)
@@ -84,7 +87,7 @@ def cmd_export(args):
         if not output:
             print("Error: -o <directory> required for QR export.")
             return
-        os.makedirs(output, exist_ok=True)
+        os.makedirs(output, mode=0o700, exist_ok=True)
         names = list_qr_images()
         if not names:
             print("No QR images found.")
@@ -95,13 +98,14 @@ def cmd_export(args):
                 path = os.path.join(output, f"{name}.jpg")
                 with open(path, "wb") as f:
                     f.write(img)
+                os.chmod(path, 0o600)
         print(f"Exported {len(names)} QR images to {output}")
 
     elif t == "all":
         if not output:
             print("Error: -o <directory> required for full export.")
             return
-        os.makedirs(output, exist_ok=True)
+        os.makedirs(output, mode=0o700, exist_ok=True)
 
         totp_data = load_totp()
         if totp_data:
@@ -109,6 +113,7 @@ def cmd_export(args):
             with open(p, "w", encoding="utf-8") as f:
                 json.dump(totp_data, f, indent=4, ensure_ascii=False)
                 f.write("\n")
+            os.chmod(p, 0o600)
             print(f"  {p}")
 
         pw_data = load_passwords()
@@ -119,6 +124,7 @@ def cmd_export(args):
                 w.writerow(["name", "password"])
                 for name, pw_val in sorted(pw_data.items()):
                     w.writerow([name, pw_val])
+            os.chmod(p, 0o600)
             print(f"  {p}")
 
         rc_data = load_recovery()
@@ -130,18 +136,20 @@ def cmd_export(args):
                     for code in rc_data[account]:
                         f.write(f"  {code}\n")
                     f.write("\n")
+            os.chmod(p, 0o600)
             print(f"  {p}")
 
         qr_dir = os.path.join(output, "qr")
         names = list_qr_images()
         if names:
-            os.makedirs(qr_dir, exist_ok=True)
+            os.makedirs(qr_dir, mode=0o700, exist_ok=True)
             for name in names:
                 img = load_qr_image(name)
                 if img:
                     p = os.path.join(qr_dir, f"{name}.jpg")
                     with open(p, "wb") as f:
                         f.write(img)
+                    os.chmod(p, 0o600)
             print(f"  {qr_dir}/ ({len(names)} images)")
 
         print(f"Exported to {output}")
