@@ -105,10 +105,15 @@ def _load_session() -> bool:
         if time.time() >= data["expires"]:
             os.unlink(SESSION_FILE)
             return False
-        _session_password = data["password"]
-        _totp_cache = data.get("totp", {})
-        _passwords_cache = data.get("passwords", {})
-        _recovery_cache = data.get("recovery", {})
+        password = data["password"]
+        totp = _decrypt_file(TOTP_FILE, password)
+        if totp is None:
+            _clear_session()
+            return False
+        _session_password = password
+        _totp_cache = totp
+        _passwords_cache = _decrypt_file(PASSWORDS_FILE, password) or {}
+        _recovery_cache = _decrypt_file(RECOVERY_FILE, password) or {}
         return True
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return False
@@ -154,30 +159,38 @@ def _encrypt_file(path: str, data: dict, password: str):
     _write_jkey(path, encrypted)
 
 
+def _vault_exists() -> bool:
+    return any(os.path.exists(p) for p in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE))
+
+
+def _decrypt_any_vault_file(password: str) -> bool:
+    for path in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE):
+        if os.path.exists(path):
+            if _decrypt_file(path, password) is not None:
+                return True
+    return False
+
+
 def _unlock_all(password: str) -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
-    data = _decrypt_file(TOTP_FILE, password)
-    if data is None:
+    if not _decrypt_any_vault_file(password):
         return False
-    _totp_cache = data
+    _totp_cache = _decrypt_file(TOTP_FILE, password) or {}
     _passwords_cache = _decrypt_file(PASSWORDS_FILE, password) or {}
     _recovery_cache = _decrypt_file(RECOVERY_FILE, password) or {}
     _session_password = password
-    _save_session(password, data, _passwords_cache, _recovery_cache)
+    _save_session(password, _totp_cache, _passwords_cache, _recovery_cache)
     return True
 
 
 def verify_password(password: str) -> bool:
-    encrypted = _read_jkey(TOTP_FILE)
-    if encrypted is None:
-        return False
-    return aes.decrypt(encrypted, password) is not None
+    return _decrypt_any_vault_file(password)
 
 
 def _ensure_unlocked():
     if is_unlocked():
         return True
-    if not os.path.exists(TOTP_FILE):
+    if not _vault_exists():
         print("Error: Vault not initialized. Run 'jkey pv init' first.")
         return False
     if _load_session():
@@ -210,7 +223,6 @@ def lock():
 
 
 def change_master_password(new_password: str) -> bool:
-    """Re-encrypt all vault data with a new master password."""
     global _session_password
     if _session_password is None:
         return False
