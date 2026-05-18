@@ -10,7 +10,6 @@ from jkey.pv.core import (
 
 
 def _check_password_strength(password: str) -> tuple[bool, str]:
-    """Check password strength and return (is_strong, warning_message)."""
     if len(password) < 8:
         return False, "Password is too short (minimum 8 characters recommended)."
 
@@ -33,7 +32,7 @@ def _check_password_strength(password: str) -> tuple[bool, str]:
 def cmd_init():
     from jkey.pv.core import CONFIG_DIR, PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE
 
-    if os.path.exists(TOTP_FILE):
+    if any(os.path.exists(p) for p in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE)):
         print("Vault already exists. Use 'jkey pv set-pw' to change password.")
         return
     pw1 = _password_from_env()
@@ -61,8 +60,8 @@ def cmd_init():
             return
 
     _ensure_dir()
-    _encrypt_file(TOTP_FILE, {}, pw1)
-    _encrypt_file(PASSWORDS_FILE, {}, pw1)
-    _encrypt_file(RECOVERY_FILE, {}, pw1)
+    for path in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE):
+        if not os.path.exists(path):
+            _encrypt_file(path, {}, pw1)
     _unlock_all(pw1)
     print(f"Vault initialized at {CONFIG_DIR}")
