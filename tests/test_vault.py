@@ -70,7 +70,7 @@ class TestEncryptDecryptFile:
 
 class TestSession:
     def test_save_and_load(self, vault_dir):
-        from jkey.pv.core import TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE, _encrypt_file, _load_session, _save_session
+        from jkey.pv.core import PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE, _encrypt_file, _load_session, _save_session
 
         _encrypt_file(TOTP_FILE, {"a": 1}, "pw")
         _encrypt_file(PASSWORDS_FILE, {"b": 2}, "pw")
