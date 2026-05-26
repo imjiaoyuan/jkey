@@ -77,7 +77,7 @@ class TestSession:
         _encrypt_file(RECOVERY_FILE, {"c": 3}, "pw")
 
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
-        assert _load_session() is True
+        assert _load_session("pw") is True
         from jkey.pv.core import _passwords_cache, _recovery_cache, _session_password, _totp_cache
 
         assert _session_password == "pw"
@@ -88,7 +88,7 @@ class TestSession:
     def test_no_session_file(self, vault_dir):
         from jkey.pv.core import _load_session
 
-        assert _load_session() is False
+        assert _load_session("pw") is False
 
     def test_expired_session(self, vault_dir):
         import jkey.pv.core as core
@@ -98,7 +98,7 @@ class TestSession:
         from unittest.mock import patch
 
         with patch("jkey.pv.core.time.time", return_value=now + core.SESSION_TIMEOUT + 1):
-            assert core._load_session() is False
+            assert core._load_session("pw") is False
         assert not os.path.exists(core.SESSION_FILE)
 
     def test_session_file_not_plaintext(self, vault_dir):
@@ -117,7 +117,7 @@ class TestSession:
 
         with open(SESSION_FILE, "w") as f:
             f.write("not json")
-        assert _load_session() is False
+        assert _load_session("pw") is False
 
 
 class TestUnlockAll:
@@ -291,7 +291,7 @@ class TestEnsureUnlocked:
         monkeypatch.setattr("getpass.getpass", lambda p="": "wrong-too")
         assert _ensure_unlocked() is False
 
-    def test_with_session(self, vault_dir):
+    def test_with_session(self, vault_dir, monkeypatch):
         from jkey.pv.core import (
             TOTP_FILE,
             _encrypt_file,
@@ -301,6 +301,7 @@ class TestEnsureUnlocked:
 
         _encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
         _save_session("pw", {"a": "b"}, {}, {})
+        monkeypatch.setenv("JKEY_PASS", "pw")
         assert _ensure_unlocked() is True
 
 
