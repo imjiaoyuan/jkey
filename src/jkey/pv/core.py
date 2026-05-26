@@ -3,7 +3,6 @@ import hashlib
 import json
 import os
 import platform
-import socket
 import sys
 import time
 
@@ -35,28 +34,8 @@ _passwords_cache: dict | None = None
 _recovery_cache: dict | None = None
 
 
-def _user_identifier() -> str:
-    if platform.system() == "Windows":
-        return os.environ.get("USERNAME", "unknown")
-    try:
-        return str(os.getuid())
-    except AttributeError:
-        return "unknown"
-
-
-def _session_secret() -> str:
-    machine_id = ""
-    for p in ("/etc/machine-id", "/var/lib/dbus/machine-id"):
-        try:
-            with open(p, "r", encoding="utf-8") as f:
-                machine_id = f.read().strip()
-                if machine_id:
-                    break
-        except OSError:
-            continue
-    if not machine_id:
-        machine_id = socket.gethostname()
-    material = f"{_user_identifier()}:{machine_id}:{CONFIG_DIR}"
+def _session_secret(password: str) -> str:
+    material = f"jkey-session-v1:{password}"
     return hashlib.sha256(material.encode("utf-8")).hexdigest()
 
 
@@ -85,27 +64,31 @@ def _save_session(password, totp, passwords, recovery):
     }
     try:
         with open(SESSION_FILE, "w") as f:
-            json.dump({"session": aes.encrypt(payload, _session_secret())}, f)
+            json.dump({"session": aes.encrypt(payload, _session_secret(password))}, f)
         os.chmod(SESSION_FILE, 0o600)
     except OSError as e:
         print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
 
 
-def _load_session() -> bool:
+def _load_session(password: str) -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
     try:
         with open(SESSION_FILE) as f:
             raw = json.load(f)
         if isinstance(raw, dict) and "session" in raw:
-            data = aes.decrypt(raw["session"], _session_secret())
+            data = aes.decrypt(raw["session"], _session_secret(password))
             if data is None:
+                _clear_session()
                 return False
         else:
             data = raw
         if time.time() >= data["expires"]:
             os.unlink(SESSION_FILE)
             return False
-        password = data["password"]
+        stored_password = data["password"]
+        if stored_password != password:
+            _clear_session()
+            return False
         totp = _decrypt_file(TOTP_FILE, password)
         if totp is None:
             _clear_session()
@@ -193,15 +176,20 @@ def _ensure_unlocked():
     if not _vault_exists():
         print("Error: Vault not initialized. Run 'jkey pv init' first.")
         return False
-    if _load_session():
-        return True
     pw = _password_from_env()
-    if pw and _unlock_all(pw):
-        return True
+    if pw:
+        if _load_session(pw):
+            return True
+        if _unlock_all(pw):
+            return True
+        print("Error: JKEY_PASS environment variable contains incorrect password.")
+        return False
     for attempt in range(3):
         if attempt > 0:
             time.sleep(2 ** attempt)
         pw = _prompt_password()
+        if _load_session(pw):
+            return True
         if _unlock_all(pw):
             return True
         print("Incorrect password. Try again.")
