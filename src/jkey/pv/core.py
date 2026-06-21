@@ -64,7 +64,7 @@ def _save_session(password, totp, passwords, recovery):
     }
     try:
         with open(SESSION_FILE, "w") as f:
-            json.dump({"session": aes.encrypt(payload, _session_secret(password))}, f)
+            json.dump({"session": aes.encrypt(payload, password), "sv": 2}, f)
         os.chmod(SESSION_FILE, 0o600)
     except OSError as e:
         print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
@@ -76,7 +76,11 @@ def _load_session(password: str) -> bool:
         with open(SESSION_FILE) as f:
             raw = json.load(f)
         if isinstance(raw, dict) and "session" in raw:
-            data = aes.decrypt(raw["session"], _session_secret(password))
+            sv = raw.get("sv", 1)
+            if sv >= 2:
+                data = aes.decrypt(raw["session"], password)
+            else:
+                data = aes.decrypt(raw["session"], _session_secret(password))
             if data is None:
                 _clear_session()
                 return False
