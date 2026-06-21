@@ -131,7 +131,7 @@ class TestCmdSetPw:
     def test_set_pw_mismatch(self, vault, capsys, monkeypatch):
         from jkey.pv.set_pw import cmd_set_pw
 
-        answers = iter(["pw1", "pw2"])
+        answers = iter(["password1", "password2"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
         cmd_set_pw()
         captured = capsys.readouterr()
