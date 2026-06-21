@@ -241,6 +241,7 @@ def save_totp(data: dict):
     global _totp_cache
     pw = _session_password
     if pw is None:
+        print("Warning: vault is locked. Changes not saved.", file=sys.stderr)
         return
     _encrypt_file(TOTP_FILE, data, pw)
     _totp_cache = data
@@ -260,6 +261,7 @@ def save_passwords(data: dict):
     global _passwords_cache
     pw = _session_password
     if pw is None:
+        print("Warning: vault is locked. Changes not saved.", file=sys.stderr)
         return
     _encrypt_file(PASSWORDS_FILE, data, pw)
     _passwords_cache = data
@@ -279,6 +281,7 @@ def save_recovery(data: dict):
     global _recovery_cache
     pw = _session_password
     if pw is None:
+        print("Warning: vault is locked. Changes not saved.", file=sys.stderr)
         return
     _encrypt_file(RECOVERY_FILE, data, pw)
     _recovery_cache = data
@@ -292,6 +295,7 @@ def _qr_path(name: str) -> str:
 def save_qr_image(name: str, image_data: bytes):
     pw = _session_password
     if pw is None:
+        print("Warning: vault is locked. Changes not saved.", file=sys.stderr)
         return
     _ensure_dir()
     encoded = base64.b64encode(image_data).decode("ascii")
