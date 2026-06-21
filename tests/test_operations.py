@@ -110,7 +110,7 @@ class TestRcRemove:
 
 
 class Test2faRemove:
-    def test_remove_account(self, vault, capsys):
+    def test_remove_account(self, vault, capsys, monkeypatch):
         import importlib
 
         remove_account = importlib.import_module("jkey.2fa.rm").remove_account
@@ -119,6 +119,7 @@ class Test2faRemove:
         save_totp({"test@example.com": "JBSWY3DPEHPK3PXP"})
         save_recovery({"test@example.com": ["rc1"]})
 
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
         remove_account("test@example.com")
         captured = capsys.readouterr()
         assert "Removed" in captured.out
@@ -180,3 +181,175 @@ class TestPmDelete:
         delete_password("nonexistent")
         captured = capsys.readouterr()
         assert "not found" in captured.out
+
+
+class TestPmLsWarning:
+    def test_warning_printed(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pm.ls import list_passwords
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "test123")
+        add_password("testaccount")
+        capsys.readouterr()
+        list_passwords()
+        captured = capsys.readouterr()
+        assert "displaying stored passwords in plaintext" in captured.err
+
+
+class Test2faRemoveWithRecovery:
+    def test_confirm_yes(self, vault, capsys, monkeypatch):
+        from jkey.pv.core import load_recovery, load_totp, save_recovery, save_totp
+
+        save_totp({"test@example.com": "JBSWY3DPEHPK3PXP"})
+        save_recovery({"test@example.com": ["rc1", "rc2"]})
+        capsys.readouterr()
+
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
+        import importlib
+
+        remove_account = importlib.import_module("jkey.2fa.rm").remove_account
+
+        remove_account("test@example.com")
+        captured = capsys.readouterr()
+        assert "Removed" in captured.out
+        assert load_recovery() == {}
+        assert load_totp() == {}
+
+    def test_confirm_no(self, vault, capsys, monkeypatch):
+        from jkey.pv.core import load_recovery, load_totp, save_recovery, save_totp
+
+        save_totp({"test@example.com": "JBSWY3DPEHPK3PXP"})
+        save_recovery({"test@example.com": ["rc1", "rc2"]})
+        capsys.readouterr()
+
+        monkeypatch.setattr("builtins.input", lambda p="": "n")
+        import importlib as _il
+
+        remove_account = _il.import_module("jkey.2fa.rm").remove_account
+
+        remove_account("test@example.com")
+        captured = capsys.readouterr()
+        assert "Recovery codes kept" in captured.out
+        assert load_recovery() == {"test@example.com": ["rc1", "rc2"]}
+        assert load_totp() == {}
+
+    def test_no_recovery_codes_no_prompt(self, vault, capsys, monkeypatch):
+        from jkey.pv.core import load_totp, save_totp
+
+        save_totp({"no_rc@example.com": "JBSWY3DPEHPK3PXP"})
+        capsys.readouterr()
+
+        # No need to mock input — no recovery codes means no prompt
+        import importlib as _il2
+
+        remove_account = _il2.import_module("jkey.2fa.rm").remove_account
+
+        remove_account("no_rc@example.com")
+        captured = capsys.readouterr()
+        assert "Removed" in captured.out
+        assert load_totp() == {}
+
+
+class TestPmAddOverwrite:
+    def test_overwrite_yes(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import load_passwords
+
+        inputs = iter(["mysecret1", "mysecret1", "o", "mysecret2", "mysecret2"])
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        monkeypatch.setattr("builtins.input", lambda p="": next(inputs))
+
+        add_password("myapp")
+        capsys.readouterr()
+        add_password("myapp")
+        captured = capsys.readouterr()
+        assert "Password stored: myapp" in captured.out
+        assert load_passwords() == {"myapp": "mysecret2"}
+
+    def test_add_suffix(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import load_passwords
+
+        inputs = iter(["mysecret1", "mysecret1", "a", "v2", "mysecret2", "mysecret2"])
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        monkeypatch.setattr("builtins.input", lambda p="": next(inputs))
+
+        add_password("myapp")
+        capsys.readouterr()
+        add_password("myapp")
+        captured = capsys.readouterr()
+        assert "Password stored: myapp-v2" in captured.out
+        assert load_passwords() == {"myapp": "mysecret1", "myapp-v2": "mysecret2"}
+
+    def test_cancel(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import load_passwords
+
+        inputs = iter(["mysecret1", "mysecret1", "c"])
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        monkeypatch.setattr("builtins.input", lambda p="": next(inputs))
+
+        add_password("myapp")
+        capsys.readouterr()
+        add_password("myapp")
+        captured = capsys.readouterr()
+        assert "Password stored" not in captured.out
+        assert load_passwords() == {"myapp": "mysecret1"}
+
+    def test_passwords_do_not_match(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+
+        inputs = iter(["pass1", "pass2"])
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        add_password("newapp")
+        captured = capsys.readouterr()
+        assert "Passwords do not match" in captured.out
+
+
+class TestRcAddOverwrite:
+    def test_overwrite_confirm_yes(self, vault, tmp_path, capsys, monkeypatch):
+        from jkey.pv.core import load_recovery
+        from jkey.rc.add import rc_add_file
+
+        f = tmp_path / "test_rc.txt"
+        f.write_text("old1\nold2\n")
+        rc_add_file(str(f))
+        capsys.readouterr()
+
+        f.write_text("new1\nnew2\n")
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
+        rc_add_file(str(f))
+        captured = capsys.readouterr()
+        assert "Imported 2 recovery codes for test_rc" in captured.out
+        assert load_recovery() == {"test_rc": ["new1", "new2"]}
+
+    def test_overwrite_confirm_no(self, vault, tmp_path, capsys, monkeypatch):
+        from jkey.pv.core import load_recovery
+        from jkey.rc.add import rc_add_file
+
+        f = tmp_path / "test_rc.txt"
+        f.write_text("old1\nold2\n")
+        rc_add_file(str(f))
+        capsys.readouterr()
+
+        monkeypatch.setattr("builtins.input", lambda p="": "n")
+        rc_add_file(str(f))
+        captured = capsys.readouterr()
+        assert "Import cancelled" in captured.out
+        assert load_recovery() == {"test_rc": ["old1", "old2"]}

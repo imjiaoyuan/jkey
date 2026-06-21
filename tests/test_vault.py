@@ -331,3 +331,99 @@ class TestPromptPassword:
         _encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
         monkeypatch.setattr("getpass.getpass", lambda p="": "wrong")
         assert _ensure_unlocked() is False
+
+
+class TestSessionV2:
+    def test_save_and_load_with_sv2(self, vault_dir):
+        import jkey.pv.core as core
+
+        core._encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
+        core._encrypt_file(core.PASSWORDS_FILE, {"a": 1}, "pw")
+        core._encrypt_file(core.RECOVERY_FILE, {"a": 1}, "pw")
+
+        core._save_session("pw", {"a": 1}, {}, {})
+        with open(core.SESSION_FILE) as f:
+            raw = json.load(f)
+        assert raw.get("sv") == 2
+        assert core._load_session("pw") is True
+
+    def test_backward_compat_sv1(self, vault_dir):
+        import jkey.pv.core as core
+        from jkey import aes
+
+        core._encrypt_file(core.TOTP_FILE, {"old": "data"}, "pw")
+        core._encrypt_file(core.PASSWORDS_FILE, {"old": "data"}, "pw")
+        core._encrypt_file(core.RECOVERY_FILE, {"old": "data"}, "pw")
+
+        payload = {
+            "expires": core.time.time() + core.SESSION_TIMEOUT,
+            "password": "pw",
+            "totp": {"old": "data"},
+            "passwords": {"old": "data"},
+            "recovery": {"old": "data"},
+        }
+        old_session = aes.encrypt(payload, core._session_secret("pw"))
+        with open(core.SESSION_FILE, "w") as f:
+            json.dump({"session": old_session}, f)
+        assert core._load_session("pw") is True
+        assert core._session_password == "pw"
+        assert core._totp_cache == {"old": "data"}
+
+
+class TestSaveWhenLocked:
+    def test_save_totp_locked(self, vault_dir, capsys):
+        from jkey.pv.core import save_totp
+
+        save_totp({"test": "secret"})
+        captured = capsys.readouterr()
+        assert "vault is locked" in captured.err
+
+    def test_save_passwords_locked(self, vault_dir, capsys):
+        from jkey.pv.core import save_passwords
+
+        save_passwords({"test": "secret"})
+        captured = capsys.readouterr()
+        assert "vault is locked" in captured.err
+
+    def test_save_recovery_locked(self, vault_dir, capsys):
+        from jkey.pv.core import save_recovery
+
+        save_recovery({"test": ["rc1"]})
+        captured = capsys.readouterr()
+        assert "vault is locked" in captured.err
+
+    def test_save_qr_locked(self, vault_dir, capsys):
+        from jkey.pv.core import save_qr_image
+
+        save_qr_image("test", b"data")
+        captured = capsys.readouterr()
+        assert "vault is locked" in captured.err
+
+
+class TestStaleTmpHandling:
+    def test_write_jkey_removes_stale_tmp(self, vault_dir):
+        from jkey.pv.core import _write_jkey
+
+        path = os.path.join(vault_dir, "test.jkey")
+        tmp = path + ".tmp"
+        with open(tmp, "w") as f:
+            f.write("stale")
+        os.chmod(tmp, 0o600)
+        _write_jkey(path, {"test": "data"})
+        assert os.path.exists(path)
+        assert not os.path.exists(tmp)
+
+
+class TestJkeyExtConstant:
+    def test_qr_path_uses_constant(self):
+        from jkey.pv.core import _JKEY_EXT, QR_DIR, _qr_path, _sanitize_filename
+
+        p = _qr_path("test")
+        assert p == os.path.join(QR_DIR, f"{_sanitize_filename('test')}{_JKEY_EXT}")
+
+    def test_list_qr_images_uses_constant(self, vault):
+        from jkey.pv.core import list_qr_images, save_qr_image
+
+        save_qr_image("uses_const", b"data")
+        names = list_qr_images()
+        assert "uses_const" in names
