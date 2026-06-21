@@ -13,6 +13,9 @@ def cmd_set_pw():
     if not pw1:
         print("Password cannot be empty.")
         return
+    if len(pw1) < 6:
+        print("Password must be at least 6 characters.")
+        return
     pw2 = core._prompt_password("Confirm new master password: ")
     if pw1 != pw2:
         print("Passwords do not match.")
