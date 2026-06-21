@@ -24,6 +24,15 @@ def rc_add_file(file_path: str):
     data = load_recovery()
     if data is None:
         return
+    if name in data:
+        try:
+            response = input(f"'{name}' already exists. Overwrite? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if response != "y":
+            print("Import cancelled.")
+            return
     data[name] = codes
     save_recovery(data)
     print(f"Imported {len(codes)} recovery codes for {name}")
