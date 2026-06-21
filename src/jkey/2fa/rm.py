@@ -13,7 +13,15 @@ def remove_account(account: str):
 
     rc = load_recovery()
     if rc and account in rc:
-        del rc[account]
-        save_recovery(rc)
+        try:
+            response = input(f"Also delete recovery codes for '{account}'? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            response = "n"
+        if response == "y":
+            del rc[account]
+            save_recovery(rc)
+        else:
+            print("Recovery codes kept.")
 
     print(f"Removed 2FA account: {account}")
