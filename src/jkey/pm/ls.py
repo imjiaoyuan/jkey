@@ -8,6 +8,9 @@ def list_passwords(keyword: str | None = None):
     if not data:
         print("No stored passwords found.")
         return
+    import sys
+
+    print("Warning: displaying stored passwords in plaintext.", file=sys.stderr)
     keys = sorted(data.keys())
     if keyword:
         keys = [k for k in keys if keyword.lower() in k.lower()]
