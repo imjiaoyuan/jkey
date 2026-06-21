@@ -19,6 +19,7 @@ RECOVERY_FILE = os.path.join(CONFIG_DIR, "recovery.jkey")
 QR_DIR = os.path.join(CONFIG_DIR, "qr")
 SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
 SESSION_TIMEOUT = 300
+_JKEY_EXT = ".jkey"
 
 _INVALID_FS_CHARS = '<>:"/\\|?*'
 
@@ -128,7 +129,14 @@ def _read_jkey(path: str) -> dict | None:
 def _write_jkey(path: str, encrypted: dict):
     _ensure_dir()
     tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    try:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+    except FileExistsError:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
     with os.fdopen(fd, "w") as f:
         json.dump(encrypted, f, indent=4, ensure_ascii=False)
     os.replace(tmp, path)
@@ -289,7 +297,7 @@ def save_recovery(data: dict):
 
 
 def _qr_path(name: str) -> str:
-    return os.path.join(QR_DIR, f"{_sanitize_filename(name)}.jkey")
+    return os.path.join(QR_DIR, f"{_sanitize_filename(name)}{_JKEY_EXT}")
 
 
 def save_qr_image(name: str, image_data: bytes):
@@ -311,7 +319,7 @@ def load_qr_image(name: str) -> bytes | None:
         return None
     path = _qr_path(name)
     if not os.path.exists(path):
-        legacy = os.path.join(QR_DIR, f"{name}.jkey")
+        legacy = os.path.join(QR_DIR, f"{name}{_JKEY_EXT}")
         if not os.path.exists(legacy):
             return None
         path = legacy
@@ -329,6 +337,6 @@ def list_qr_images() -> list[str]:
         return []
     names = []
     for f in os.listdir(QR_DIR):
-        if f.endswith(".jkey"):
-            names.append(f[:-5])
+        if f.endswith(_JKEY_EXT):
+            names.append(f[:-len(_JKEY_EXT)])
     return sorted(names)
