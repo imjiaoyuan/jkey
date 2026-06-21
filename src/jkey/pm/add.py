@@ -7,9 +7,36 @@ def add_password(name: str):
     data = load_passwords()
     if data is None:
         return
+
+    if name in data:
+        try:
+            choice = input(f"'{name}' already exists. (o)verwrite / (a)dd suffix / (c)ancel? (o/a/c): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if choice == "c":
+            return
+        elif choice == "a":
+            try:
+                suffix = input("Suffix: ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return
+            if not suffix:
+                print("Suffix cannot be empty.")
+                return
+            name = f"{name}-{suffix}"
+        elif choice != "o":
+            print("Invalid choice.")
+            return
+
     pw = getpass.getpass(f"Password for '{name}': ")
     if not pw:
         print("Password cannot be empty.")
+        return
+    pw2 = getpass.getpass(f"Confirm password for '{name}': ")
+    if pw != pw2:
+        print("Passwords do not match.")
         return
     data[name] = pw
     save_passwords(data)
