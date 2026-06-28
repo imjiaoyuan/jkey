@@ -13,9 +13,17 @@ def cmd_set_pw():
     if not pw1:
         print("Password cannot be empty.")
         return
-    if len(pw1) < 6:
-        print("Password must be at least 6 characters.")
-        return
+    is_strong, warning = core._check_password_strength(pw1)
+    if not is_strong:
+        print(f"Warning: {warning}")
+        try:
+            response = input("Continue anyway? (y/N): ").strip().lower()
+            if response != "y":
+                print("Password change cancelled.")
+                return
+        except (EOFError, KeyboardInterrupt):
+            print("\nPassword change cancelled.")
+            return
     pw2 = core._prompt_password("Confirm new master password: ")
     if pw1 != pw2:
         print("Passwords do not match.")

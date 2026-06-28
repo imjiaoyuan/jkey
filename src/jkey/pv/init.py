@@ -1,32 +1,13 @@
 import os
 
 from jkey.pv.core import (
+    _check_password_strength,
     _encrypt_file,
     _ensure_dir,
     _password_from_env,
     _prompt_password,
     _unlock_all,
 )
-
-
-def _check_password_strength(password: str) -> tuple[bool, str]:
-    if len(password) < 8:
-        return False, "Password is too short (minimum 8 characters recommended)."
-
-    has_upper = any(c.isupper() for c in password)
-    has_lower = any(c.islower() for c in password)
-    has_digit = any(c.isdigit() for c in password)
-    has_special = any(not c.isalnum() for c in password)
-
-    strength_count = sum([has_upper, has_lower, has_digit, has_special])
-
-    if len(password) < 12:
-        return False, "Password should be at least 12 characters for better security."
-
-    if strength_count < 3:
-        return False, "Password should include uppercase, lowercase, digits, and special characters."
-
-    return True, ""
 
 
 def cmd_init():

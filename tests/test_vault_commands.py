@@ -119,19 +119,19 @@ class TestCmdSetPw:
         from jkey.pv.core import TOTP_FILE, _decrypt_file
         from jkey.pv.set_pw import cmd_set_pw
 
-        answers = iter(["new-password", "new-password"])
+        answers = iter(["New-Password-123!", "New-Password-123!"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
         cmd_set_pw()
         captured = capsys.readouterr()
         assert "changed" in captured.out
-        assert core._session_password == "new-password"
+        assert core._session_password == "New-Password-123!"
         assert _decrypt_file(TOTP_FILE, "test-password") is None
-        assert _decrypt_file(TOTP_FILE, "new-password") is not None
+        assert _decrypt_file(TOTP_FILE, "New-Password-123!") is not None
 
     def test_set_pw_mismatch(self, vault, capsys, monkeypatch):
         from jkey.pv.set_pw import cmd_set_pw
 
-        answers = iter(["password1", "password2"])
+        answers = iter(["New-Pass-123!", "New-Pass-456!"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
         cmd_set_pw()
         captured = capsys.readouterr()

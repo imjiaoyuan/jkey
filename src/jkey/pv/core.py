@@ -1,4 +1,6 @@
 import base64
+import contextlib
+import fcntl
 import hashlib
 import json
 import os
@@ -18,16 +20,48 @@ PASSWORDS_FILE = os.path.join(CONFIG_DIR, "passwords.jkey")
 RECOVERY_FILE = os.path.join(CONFIG_DIR, "recovery.jkey")
 QR_DIR = os.path.join(CONFIG_DIR, "qr")
 SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
-SESSION_TIMEOUT = 300
+SESSION_TIMEOUT = int(os.environ.get("JKEY_SESSION_TIMEOUT", "300"))
+VAULT_LOCK_PATH = os.path.join(CONFIG_DIR, ".lock")
 _JKEY_EXT = ".jkey"
 
 _INVALID_FS_CHARS = '<>:"/\\|?*'
+
+
+def _check_password_strength(password: str) -> tuple[bool, str]:
+    if len(password) < 8:
+        return False, "Password is too short (minimum 8 characters recommended)."
+    has_upper = any(c.isupper() for c in password)
+    has_lower = any(c.islower() for c in password)
+    has_digit = any(c.isdigit() for c in password)
+    has_special = any(not c.isalnum() for c in password)
+    strength_count = sum([has_upper, has_lower, has_digit, has_special])
+    if len(password) < 12:
+        return False, "Password should be at least 12 characters for better security."
+    if strength_count < 3:
+        return False, "Password should include uppercase, lowercase, digits, and special characters."
+    return True, ""
 
 
 def _sanitize_filename(name: str) -> str:
     for ch in _INVALID_FS_CHARS:
         name = name.replace(ch, "_")
     return name
+
+
+@contextlib.contextmanager
+def _lock_vault(shared: bool = False):
+    if platform.system() == "Windows":
+        yield
+        return
+    _ensure_dir()
+    fd = os.open(VAULT_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
+    try:
+        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+        yield
+    finally:
+        fcntl.flock(fd, fcntl.LOCK_UN)
+        os.close(fd)
+
 
 _session_password: str | None = None
 _totp_cache: dict | None = None
@@ -94,14 +128,10 @@ def _load_session(password: str) -> bool:
         if stored_password != password:
             _clear_session()
             return False
-        totp = _decrypt_file(TOTP_FILE, password)
-        if totp is None:
-            _clear_session()
-            return False
         _session_password = password
-        _totp_cache = totp
-        _passwords_cache = _decrypt_file(PASSWORDS_FILE, password) or {}
-        _recovery_cache = _decrypt_file(RECOVERY_FILE, password) or {}
+        _totp_cache = data["totp"]
+        _passwords_cache = data["passwords"]
+        _recovery_cache = data["recovery"]
         return True
     except (OSError, json.JSONDecodeError, KeyError, TypeError):
         return False
@@ -119,27 +149,29 @@ def _clear_session():
 def _read_jkey(path: str) -> dict | None:
     if not os.path.exists(path):
         return None
-    try:
-        with open(path, "r") as f:
-            return json.load(f)
-    except Exception:
-        return None
+    with _lock_vault(shared=True):
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except Exception:
+            return None
 
 
 def _write_jkey(path: str, encrypted: dict):
     _ensure_dir()
     tmp = path + ".tmp"
-    try:
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    except FileExistsError:
+    with _lock_vault():
         try:
-            os.unlink(tmp)
-        except OSError:
-            pass
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-    with os.fdopen(fd, "w") as f:
-        json.dump(encrypted, f, indent=4, ensure_ascii=False)
-    os.replace(tmp, path)
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        except FileExistsError:
+            try:
+                os.unlink(tmp)
+            except OSError:
+                pass
+            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        with os.fdopen(fd, "w") as f:
+            json.dump(encrypted, f, indent=4, ensure_ascii=False)
+        os.replace(tmp, path)
 
 
 def _decrypt_file(path: str, password: str) -> dict | None:
