@@ -83,7 +83,15 @@ def _2fa(args):
 
     a = args.action
     if a == "ls":
-        importlib.import_module("jkey.2fa.ls").list_accounts(args.keyword)
+        result = importlib.import_module("jkey.2fa.ls").list_accounts(args.keyword)
+        if result is None:
+            return
+        if not result:
+            msg = f"No accounts matching '{args.keyword}'." if args.keyword else "No 2FA accounts found."
+            print(msg)
+            return
+        for name, code in result:
+            print(f"{name}: {code}")
     elif a == "add":
         importlib.import_module("jkey.2fa.add").scan_and_add(args.image_path)
     elif a == "rm":
@@ -99,7 +107,17 @@ def _rc(args):
     if a == "add":
         importlib.import_module("jkey.rc.add").rc_add_file(args.file_path)
     elif a == "ls":
-        importlib.import_module("jkey.rc.ls").rc_list(args.keyword)
+        result = importlib.import_module("jkey.rc.ls").rc_list(args.keyword)
+        if result is None:
+            return
+        if not result:
+            msg = f"No recovery codes matching '{args.keyword}'." if args.keyword else "No recovery codes found."
+            print(msg)
+            return
+        for name, codes in result.items():
+            print(f"{name}:")
+            for code in codes:
+                print(f"  {code}")
     elif a == "rm":
         importlib.import_module("jkey.rc.rm").rc_remove(args.account)
     else:
@@ -111,7 +129,16 @@ def _pm(args):
 
     a = args.action
     if a == "ls":
-        importlib.import_module("jkey.pm.ls").list_passwords(args.keyword)
+        result = importlib.import_module("jkey.pm.ls").list_passwords(args.keyword)
+        if result is None:
+            return
+        if not result:
+            msg = f"No passwords matching '{args.keyword}'." if args.keyword else "No stored passwords found."
+            print(msg)
+            return
+        print("Warning: displaying stored passwords in plaintext.", file=sys.stderr)
+        for name, pw_val in result.items():
+            print(f"{name}: {pw_val}")
     elif a == "get":
         try:
             pwd = importlib.import_module("jkey.pm.get").generate_password(
