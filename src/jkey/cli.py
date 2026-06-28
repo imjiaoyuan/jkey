@@ -43,12 +43,15 @@ def main():
     a.add_argument("name")
     a = p2.add_parser("rm", help="Delete password")
     a.add_argument("name")
+    e = p2.add_parser("edit", help="Update an existing password")
+    e.add_argument("name")
 
     p = sub.add_parser("pv", help="Manage encrypted vault")
     p2 = p.add_subparsers(dest="action")
     p2.add_parser("init", help="Initialize vault")
     p2.add_parser("unlock", help="Unlock vault")
     p2.add_parser("lock", help="Lock vault")
+    p2.add_parser("status", help="Show vault status")
     p2.add_parser("set-pw", help="Set master password")
     e = p2.add_parser("encrypt", help="Encrypt a file")
     e.add_argument("input")
@@ -126,8 +129,10 @@ def _pm(args):
         importlib.import_module("jkey.pm.add").add_password(args.name)
     elif a == "rm":
         importlib.import_module("jkey.pm.rm").delete_password(args.name)
+    elif a == "edit":
+        importlib.import_module("jkey.pm.edit").edit_password(args.name)
     else:
-        print("Usage: jkey pm ls|get|add|rm")
+        print("Usage: jkey pm ls|get|add|rm|edit")
 
 
 def _pv(args):
@@ -140,6 +145,8 @@ def _pv(args):
         importlib.import_module("jkey.pv.unlock").cmd_unlock()
     elif a == "lock":
         importlib.import_module("jkey.pv.lock").cmd_lock()
+    elif a == "status":
+        importlib.import_module("jkey.pv.status").cmd_status()
     elif a == "set-pw":
         importlib.import_module("jkey.pv.set_pw").cmd_set_pw()
     elif a == "encrypt":
@@ -149,4 +156,4 @@ def _pv(args):
     elif a == "export":
         importlib.import_module("jkey.pv.export").cmd_export(args)
     else:
-        print("Usage: jkey pv init|unlock|lock|set-pw|encrypt|decrypt|export")
+        print("Usage: jkey pv init|unlock|lock|status|set-pw|encrypt|decrypt|export")
