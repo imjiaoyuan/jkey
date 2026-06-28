@@ -1,4 +1,12 @@
-from jkey.pv.core import load_recovery, load_totp, save_recovery, save_totp
+import os
+
+from jkey.pv.core import (
+    _qr_path,
+    load_recovery,
+    load_totp,
+    save_recovery,
+    save_totp,
+)
 
 
 def remove_account(account: str):
@@ -10,6 +18,13 @@ def remove_account(account: str):
         return
     del data[account]
     save_totp(data)
+
+    qr_path = _qr_path(account)
+    if os.path.exists(qr_path):
+        try:
+            os.unlink(qr_path)
+        except OSError:
+            pass
 
     rc = load_recovery()
     if rc and account in rc:

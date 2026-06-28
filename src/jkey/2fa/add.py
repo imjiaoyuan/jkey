@@ -2,9 +2,12 @@ import os
 import sys
 from urllib.parse import parse_qs, unquote, urlparse
 
-import cv2
-
 from jkey.pv.core import load_totp, save_qr_image, save_totp
+
+try:
+    import cv2
+except ImportError:
+    cv2 = None
 
 
 def _resize_if_large(img, max_size=1000):
@@ -17,6 +20,10 @@ def _resize_if_large(img, max_size=1000):
 
 
 def scan_and_add(image_path: str):
+    if cv2 is None:
+        print("Error: opencv-python-headless is required for QR scanning.")
+        print("Install with: pip install opencv-python-headless")
+        return
     if not os.path.exists(image_path):
         print(f"Error: File not found: {image_path}")
         return
