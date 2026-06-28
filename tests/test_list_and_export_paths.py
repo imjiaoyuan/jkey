@@ -62,17 +62,17 @@ class TestListCommands:
         monkeypatch.setattr(mod, "load_totp", lambda: {"acc": "bad-secret"})
         monkeypatch.setattr(mod, "totp", lambda _secret: (_ for _ in ()).throw(binascii.Error("bad base32")))
 
-        mod.list_accounts()
-        captured = capsys.readouterr()
-        assert "Error processing 'acc'" in captured.out
+        result = mod.list_accounts()
+        assert len(result) == 1
+        assert result[0][0] == "acc"
+        assert "Error" in result[0][1]
 
     def test_pm_list_keyword_no_match(self, monkeypatch, capsys):
         mod = importlib.import_module("jkey.pm.ls")
 
         monkeypatch.setattr(mod, "load_passwords", lambda: {"GitHub": "pw"})
-        mod.list_passwords("gitlab")
-        captured = capsys.readouterr()
-        assert "No passwords matching 'gitlab'" in captured.out
+        result = mod.list_passwords("gitlab")
+        assert result == {}
 
 
 class TestExportPaths:

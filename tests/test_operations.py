@@ -40,9 +40,8 @@ class TestRcList:
     def test_list_empty(self, vault, capsys):
         from jkey.rc.ls import rc_list
 
-        rc_list()
-        captured = capsys.readouterr()
-        assert "No recovery codes found" in captured.out
+        result = rc_list()
+        assert result == {}
 
     def test_list_with_codes(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
@@ -53,10 +52,9 @@ class TestRcList:
         rc_add_file(str(f))
         capsys.readouterr()
 
-        rc_list()
-        captured = capsys.readouterr()
-        assert "rc1" in captured.out
-        assert "rc2" in captured.out
+        result = rc_list()
+        assert "test_codes" in result
+        assert result["test_codes"] == ["rc1", "rc2"]
 
     def test_list_with_keyword(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
@@ -68,10 +66,9 @@ class TestRcList:
             rc_add_file(str(f))
             capsys.readouterr()
 
-        rc_list("google")
-        captured = capsys.readouterr()
-        assert "google" in captured.out
-        assert "github" not in captured.out
+        result = rc_list("google")
+        assert "_google" in result
+        assert "_github" not in result
 
     def test_list_keyword_no_match(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
@@ -82,9 +79,8 @@ class TestRcList:
         rc_add_file(str(f))
         capsys.readouterr()
 
-        rc_list("nonexistent")
-        captured = capsys.readouterr()
-        assert "No recovery codes matching" in captured.out
+        result = rc_list("nonexistent")
+        assert result == {}
 
 
 class TestRcRemove:
@@ -184,16 +180,27 @@ class TestPmDelete:
 
 
 class TestPmLsWarning:
-    def test_warning_printed(self, vault, capsys, monkeypatch):
+    def test_list_returns_data(self, vault, capsys, monkeypatch):
         from jkey.pm.add import add_password
         from jkey.pm.ls import list_passwords
 
         monkeypatch.setattr("getpass.getpass", lambda p="": "test123")
         add_password("testaccount")
         capsys.readouterr()
-        list_passwords()
-        captured = capsys.readouterr()
-        assert "displaying stored passwords in plaintext" in captured.err
+        result = list_passwords()
+        assert "testaccount" in result
+        assert result["testaccount"] == "test123"
+
+    def test_list_keyword_filter(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pm.ls import list_passwords
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "test123")
+        add_password("GitHub")
+        capsys.readouterr()
+        result = list_passwords("hub")
+        assert "GitHub" in result
+        assert "GitHub" not in list_passwords("gitlab")
 
 
 class Test2faRemoveWithRecovery:
