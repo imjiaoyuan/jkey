@@ -153,7 +153,7 @@ def _read_jkey(path: str) -> dict | None:
         try:
             with open(path, "r") as f:
                 return json.load(f)
-        except Exception:
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
             return None
 
 

@@ -1,4 +1,5 @@
 import base64
+import binascii
 import hashlib
 import hmac
 import struct
@@ -25,7 +26,7 @@ def _validate_b32_secret(s: str) -> bool:
     try:
         _b32_decode(s)
         return True
-    except Exception:
+    except (binascii.Error, ValueError):
         return False
 
 
