@@ -1,21 +1,13 @@
 from jkey.pm.core import load_passwords
 
 
-def list_passwords(keyword: str | None = None):
+def list_passwords(keyword: str | None = None) -> dict[str, str] | None:
     data = load_passwords()
     if data is None:
-        return
+        return None
     if not data:
-        print("No stored passwords found.")
-        return
-    import sys
-
-    print("Warning: displaying stored passwords in plaintext.", file=sys.stderr)
+        return {}
     keys = sorted(data.keys())
     if keyword:
         keys = [k for k in keys if keyword.lower() in k.lower()]
-        if not keys:
-            print(f"No passwords matching '{keyword}'.")
-            return
-    for name in keys:
-        print(f"{name}: {data[name]}")
+    return {k: data[k] for k in keys}
