@@ -1,4 +1,5 @@
 import base64
+import binascii
 import hashlib
 import hmac
 import json
@@ -254,7 +255,7 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         iv = base64.b64decode(encrypted["iv"])
         ciphertext = base64.b64decode(encrypted["data"])
         stored_mac = base64.b64decode(encrypted["mac"])
-    except Exception:
+    except (KeyError, TypeError, binascii.Error):
         return None
 
     version = encrypted.get("version", 1)
@@ -274,6 +275,6 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         padded = aes_cbc_decrypt(ciphertext, enc_key, iv)
         plaintext = _pkcs7_unpad(padded)
         return json.loads(plaintext.decode("utf-8"))
-    except Exception as e:
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as e:
         print(f"Warning: decryption integrity check failed: {e}", file=sys.stderr)
         return None
