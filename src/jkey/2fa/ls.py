@@ -1,3 +1,5 @@
+import binascii
+
 from jkey.pv.core import load_totp
 
 from .core import totp
@@ -20,5 +22,5 @@ def list_accounts(keyword: str | None = None):
         secret = data[acc_id]
         try:
             print(f"{acc_id}: {totp(secret)}")
-        except Exception as e:
+        except binascii.Error as e:
             print(f"Error processing '{acc_id}': {e}")

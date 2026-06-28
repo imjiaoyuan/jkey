@@ -1,3 +1,4 @@
+import binascii
 import importlib
 import json
 
@@ -45,7 +46,7 @@ class Test2faAddPaths:
         monkeypatch.setattr(mod, "load_totp", lambda: {})
         monkeypatch.setattr(mod, "save_totp", lambda data: stored.update(data))
         monkeypatch.setattr(mod.cv2, "imencode", lambda _ext, _img: (True, _FakeEncoded()))
-        monkeypatch.setattr(mod, "save_qr_image", lambda _name, _data: (_ for _ in ()).throw(RuntimeError("disk full")))
+        monkeypatch.setattr(mod, "save_qr_image", lambda _name, _data: (_ for _ in ()).throw(OSError("disk full")))
 
         mod.scan_and_add("/tmp/qr.png")
         captured = capsys.readouterr()
@@ -59,7 +60,7 @@ class TestListCommands:
         mod = importlib.import_module("jkey.2fa.ls")
 
         monkeypatch.setattr(mod, "load_totp", lambda: {"acc": "bad-secret"})
-        monkeypatch.setattr(mod, "totp", lambda _secret: (_ for _ in ()).throw(ValueError("bad base32")))
+        monkeypatch.setattr(mod, "totp", lambda _secret: (_ for _ in ()).throw(binascii.Error("bad base32")))
 
         mod.list_accounts()
         captured = capsys.readouterr()

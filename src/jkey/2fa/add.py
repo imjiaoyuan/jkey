@@ -67,5 +67,5 @@ def scan_and_add(image_path: str):
     try:
         resized = _resize_if_large(img, max_size=1000)
         save_qr_image(name, cv2.imencode(".jpg", resized)[1].tobytes())
-    except Exception:
+    except (cv2.error, OSError):
         print(f"Warning: failed to save encrypted QR backup for '{name}'", file=sys.stderr)
