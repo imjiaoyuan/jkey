@@ -2,6 +2,8 @@ import binascii
 import importlib
 import json
 
+import pytest
+
 
 class _FakeImage:
     shape = (100, 100, 3)
@@ -21,6 +23,10 @@ class _FakeEncoded:
 
 
 class Test2faAddPaths:
+    @pytest.mark.skipif(
+        not importlib.import_module("jkey.2fa.add").cv2,
+        reason="opencv-python-headless not installed",
+    )
     def test_scan_invalid_scheme(self, monkeypatch, capsys):
         mod = importlib.import_module("jkey.2fa.add")
 
@@ -32,6 +38,10 @@ class Test2faAddPaths:
         captured = capsys.readouterr()
         assert "Not a valid otpauth://" in captured.out
 
+    @pytest.mark.skipif(
+        not importlib.import_module("jkey.2fa.add").cv2,
+        reason="opencv-python-headless not installed",
+    )
     def test_scan_success_warns_when_qr_backup_fails(self, monkeypatch, capsys):
         mod = importlib.import_module("jkey.2fa.add")
         stored = {}

@@ -29,12 +29,14 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `uv run jkey pm ls [keyword]` — List/filter stored passwords
 - `uv run jkey pm get [-L N] [--no-upper] [--no-lower] [--no-digits] [--no-symbols]` — Generate random password
 - `uv run jkey pm add <name>` — Store a password (interactive input)
+- `uv run jkey pm edit <name>` — Update an existing password (interactive input)
 - `uv run jkey pm rm <name>` — Delete a password
 
 ### Vault
 - `uv run jkey pv init` — Initialize vault (set master password)
 - `uv run jkey pv unlock` — Unlock vault
 - `uv run jkey pv lock` — Lock vault
+- `uv run jkey pv status` — Show vault status (config directory, initialized/unlocked state)
 - `uv run jkey pv set-pw` — Change master password
 - `uv run jkey pv encrypt <file> [-o output.jkey]` — Encrypt a file
 - `uv run jkey pv decrypt <file.jkey> [-o output]` — Decrypt a .jkey file
@@ -46,6 +48,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Environment
 - `JKEY_PASS` — Set master password via env var to skip interactive prompt. Export commands still re-verify the password even when `JKEY_PASS` is set.
+- `JKEY_SESSION_TIMEOUT` — Session cache timeout in seconds (default: 300).
 
 ## Project Structure
 
@@ -53,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 src/
 └── jkey/
     ├── __init__.py
-    ├── __main__.py              # python -m jkey entry
+    ├── __main__.py              # python -m jkey entry (calls cli.main())
     ├── cli.py                   # argparse CLI entry (lazy imports)
     ├── aes.py                   # AES-256-CBC + HMAC pure Python implementation
     ├── 2fa/
@@ -66,8 +69,9 @@ src/
     │   ├── ls.py                # List recovery codes
     │   └── rm.py                # Remove recovery codes
     ├── pm/
-    │   ├── core.py              # Password data access (re-exports from pv.core)
+    │   ├── core.py              # Re-exports load_passwords/save_passwords from pv.core
     │   ├── add.py               # Store password
+    │   ├── edit.py              # Update existing password
     │   ├── get.py               # Generate random password (secrets module)
     │   ├── ls.py                # List passwords
     │   └── rm.py                # Delete password
@@ -76,14 +80,21 @@ src/
         ├── init.py              # Vault initialization
         ├── unlock.py            # Vault unlock
         ├── lock.py              # Vault lock
+        ├── status.py            # Show vault status
         ├── set_pw.py            # Change master password
         ├── encrypt.py           # Encrypt arbitrary file
         ├── decrypt.py           # Decrypt a .jkey file
         └── export.py            # Data export (re-verifies password)
 tests/
+├── conftest.py                  # Shared fixtures: vault_dir, vault, mock_getpass
 ├── test_aes.py                  # Encrypt/decrypt roundtrip, v2 compat, tamper resistance
+├── test_cli.py                  # CLI argument parsing and subcommand dispatch
+├── test_generator.py            # Password generation: charset, length, uniqueness
+├── test_list_and_export_paths.py # List/export function return value paths
+├── test_operations.py           # CRUD operations: add, edit, remove across domains
 ├── test_totp.py                 # RFC 4226 test vectors, base32, TOTP generation
-└── test_generator.py            # Password generation: charset, length, uniqueness
+├── test_vault.py                # Vault core: session, lock, set-pw, init, encrypt/decrypt
+└── test_vault_commands.py       # Vault CLI commands: init, unlock, lock, status, set-pw
 .github/
 └── workflows/
     ├── ci.yml                   # CI: ruff lint + pytest (py3.10–3.14)
@@ -99,9 +110,9 @@ CLI (cli.py) → Domain modules (2fa/ pm/ rc/) → Vault core (pv/core.py) → C
 ```
 
 - **`aes.py`** — Pure-Python AES-256-CBC + HMAC-SHA256. Has zero external dependencies. Exposes only `encrypt(dict, password) → dict` and `decrypt(dict, password) → dict | None`. All internal functions (`_key_expansion`, `_encrypt_block`, `_pkcs7_pad`, etc.) are private. PBKDF2-HMAC-SHA256 with 600,000 iterations.
-- **`pv/core.py`** — Vault session manager and the sole data-access layer. Module-level globals (`_session_password`, `_totp_cache`, `_passwords_cache`, `_recovery_cache`) track unlocked state. All domain modules read/write through its `load_*`/`save_*` functions. Also manages QR image storage.
-- **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` for data access; never touch `aes.py` directly.
-- **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked. This avoids loading `opencv-python-headless` (heavy) when the user only needs `pm ls` or `pv unlock`.
+- **`pv/core.py`** — Vault session manager and the sole data-access layer. Module-level globals (`_session_password`, `_totp_cache`, `_passwords_cache`, `_recovery_cache`) track unlocked state. All domain modules read/write through its `load_*`/`save_*` functions. Also manages QR image storage. Uses `fcntl.flock` for concurrent access protection (shared locks for reads, exclusive for writes; no-op on Windows).
+- **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly.
+- **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked. This avoids loading `opencv-python-headless` (heavy) when the user only needs `pm ls` or `pv unlock`. The `pm ls` and `rc ls` subcommands return structured data from their core functions and do the printing in `cli.py`; other commands still print internally.
 
 ### Encryption Format
 
@@ -116,7 +127,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ### Session Management
 
-- On unlock, the master password is cached in memory (`_session_password`) and persisted to `~/.config/jkey/.session` (mode 600) with a 5-minute TTL.
+- On unlock, the master password is cached in memory (`_session_password`) and persisted to `~/.config/jkey/.session` (mode 600) with a 5-minute TTL (configurable via `JKEY_SESSION_TIMEOUT` env var).
 - The `.session` file is itself encrypted: session version `sv=2` encrypts the session blob with the password; older `sv=1` used a SHA-256 hash of the password as the encryption key.
 - On next use, `_load_session()` is tried first (fast path). If it fails or expired, falls back to `_unlock_all()` which re-decrypts vault files.
 - Failed password attempts use exponential backoff (2^attempt seconds), max 3 attempts.
@@ -125,14 +136,25 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ### File I/O (Atomic Writes)
 
-`_write_jkey()` writes to a `.tmp` file then uses `os.replace()` (atomic on POSIX). Stale `.tmp` files from crashed writes are silently removed on next write. Files are created with mode 600.
+`_write_jkey()` writes to a `.tmp` file then uses `os.replace()` (atomic on POSIX). Stale `.tmp` files from crashed writes are silently removed on next write. Files are created with mode 600. QR image filenames are sanitized by replacing invalid filesystem characters (`<>:"/\|?*`) with underscores.
 
 ### Password Generation
 
 `pm/get.py` uses Python's `secrets` module (CSPRNG). Character sets: lowercase, uppercase, digits, and `!@#$%^&*`. At least one character set must be enabled; length must be ≥ the number of enabled sets (one guaranteed char per set). Raises `ValueError` on invalid config.
 
+### Vault Initialization
+
+`pv/init.py` checks password strength via `_check_password_strength()`: minimum 8 characters, recommends 12+ with 3 of 4 character classes (upper, lower, digit, special).
+
 ## Testing
 
+### Fixtures (conftest.py)
+
+- **`vault_dir`** — Creates a temp directory and monkeypatches all `pv.core` path constants (`CONFIG_DIR`, `TOTP_FILE`, etc.) to point there. Cleans up module-level cache globals after each test.
+- **`vault`** — Returns an initialized-and-unlocked `pv.core` module scoped to the temp directory. Use for tests that need a ready vault.
+- **`mock_getpass`** — Factory fixture that monkeypatches `getpass.getpass` to return a fixed password. Call as `mock_getpass(pw="custom-pw")` to set the password.
+
+### Test patterns
 - Tests access private functions via `importlib.import_module("jkey.2fa.core")._hotp` — the same lazy-import pattern used by the CLI.
 - `test_aes.py::TestV2Compat` manually constructs v2-format ciphertexts to verify backward compatibility.
 - TOTP tests include RFC 4226 test vectors (counter 0–9) against known HOTP values.
@@ -143,11 +165,14 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 ```
 ~/.config/jkey/
 ├── .session           # Encrypted session cache (5 min timeout, mode 600)
+├── .lock              # fcntl lock file (POSIX only)
 ├── totp.jkey          # Encrypted TOTP secrets: {name: base32_secret}
 ├── passwords.jkey     # Encrypted passwords: {name: password}
 ├── recovery.jkey      # Encrypted recovery codes: {account: [code, ...]}
 └── qr/
     └── <name>.jkey    # Encrypted QR images (JPEG bytes base64-encoded)
 ```
+
+On Windows, `CONFIG_DIR` falls back to `%APPDATA%/jkey` instead of `~/.config/jkey`.
 
 `.gitignore` excludes `.venv`, `.python-version`, `__pycache__`, `*.pyc`, `*.tmp`, `.ruff_cache/`, `*.egg-info/`, `dist/`.
