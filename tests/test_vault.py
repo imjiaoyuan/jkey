@@ -1,6 +1,8 @@
 import json
 import os
 
+import pytest
+
 from jkey import aes
 
 
@@ -38,12 +40,15 @@ class TestReadWriteJkey:
         assert _read_jkey("/nonexistent/path.jkey") is None
 
     def test_read_empty_file(self, vault_dir):
+        import json
+
         from jkey.pv.core import _read_jkey
 
         path = os.path.join(vault_dir, "empty.jkey")
         with open(path, "w") as f:
             f.write("")
-        assert _read_jkey(path) is None
+        with pytest.raises(json.JSONDecodeError):
+            _read_jkey(path)
 
 
 class TestEncryptDecryptFile:
