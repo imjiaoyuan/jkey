@@ -358,3 +358,62 @@ class TestRcAddOverwrite:
         captured = capsys.readouterr()
         assert "Import cancelled" in captured.out
         assert load_recovery() == {"test_rc": ["old1", "old2"]}
+
+
+class TestPmEdit:
+    def test_edit_existing(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pm.edit import edit_password
+        from jkey.pv.core import load_passwords
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "oldsecret")
+        add_password("myapp")
+        capsys.readouterr()
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "newsecret")
+        edit_password("myapp")
+        captured = capsys.readouterr()
+        assert "Password updated: myapp" in captured.out
+        assert load_passwords() == {"myapp": "newsecret"}
+
+    def test_edit_nonexistent(self, vault, capsys):
+        from jkey.pm.edit import edit_password
+
+        edit_password("nonexistent")
+        captured = capsys.readouterr()
+        assert "not found" in captured.out
+
+    def test_edit_empty_password(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pm.edit import edit_password
+        from jkey.pv.core import load_passwords
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "oldsecret")
+        add_password("myapp")
+        capsys.readouterr()
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "")
+        edit_password("myapp")
+        captured = capsys.readouterr()
+        assert "cannot be empty" in captured.out
+        assert load_passwords() == {"myapp": "oldsecret"}
+
+    def test_edit_mismatch(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pm.edit import edit_password
+        from jkey.pv.core import load_passwords
+
+        monkeypatch.setattr("getpass.getpass", lambda p="": "oldsecret")
+        add_password("myapp")
+        capsys.readouterr()
+
+        inputs = iter(["newpass1", "newpass2"])
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        edit_password("myapp")
+        captured = capsys.readouterr()
+        assert "do not match" in captured.out
+        assert load_passwords() == {"myapp": "oldsecret"}
