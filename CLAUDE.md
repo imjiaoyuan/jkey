@@ -10,16 +10,18 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ### Development
 - `uv sync --group dev` — Install all dependencies including dev tools
-- `uv run pytest tests/` — Run all tests with coverage
+- `uv run pytest tests/` — Run all tests (coverage auto-configured via pyproject.toml)
 - `uv run pytest tests/ -k "test_name"` — Run a single test by name pattern
 - `uv run ruff check src/ tests/` — Lint
 - `uv run ruff format src/ tests/` — Format
 - `uv build` — Build distribution packages
 
+CI (`.github/workflows/ci.yml`) runs lint on Python 3.13 and tests on 3.10–3.14.
+
 ### 2FA
 - `uv run jkey 2fa ls [keyword]` — List accounts and current TOTP codes (case-insensitive filter)
 - `uv run jkey 2fa add <image_path>` — Import account from QR code image (auto-saves image encrypted)
-- `uv run jkey 2fa rm <account>` — Remove an account
+- `uv run jkey 2fa rm <account>` — Remove an account (also prompts to delete matching recovery codes)
 
 ### Recovery Codes
 - `uv run jkey rc add <file>` — Import recovery codes from file (filename as account name)
@@ -113,7 +115,7 @@ CLI (cli.py) → Domain modules (2fa/ pm/ rc/) → Vault core (pv/core.py) → C
 - **`aes.py`** — Pure-Python AES-256-CBC + HMAC-SHA256. Has zero external dependencies. Exposes only `encrypt(dict, password) → dict` and `decrypt(dict, password) → dict | None`. All internal functions (`_key_expansion`, `_encrypt_block`, `_pkcs7_pad`, etc.) are private. PBKDF2-HMAC-SHA256 with 600,000 iterations.
 - **`pv/core.py`** — Vault session manager and the sole data-access layer. Module-level globals (`_session_password`, `_totp_cache`, `_passwords_cache`, `_recovery_cache`) track unlocked state. All domain modules read/write through its `load_*`/`save_*` functions. Also manages QR image storage. Uses `fcntl.flock` for concurrent access protection (shared locks for reads, exclusive for writes; no-op on Windows).
 - **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly.
-- **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked, keeping startup fast. All three `ls` subcommands (`2fa ls`, `pm ls`, `rc ls`) return structured data from their core functions; `cli.py` handles printing. Other commands print internally within their domain modules.
+- **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked, keeping startup fast. Because the `2fa` package name starts with a digit, imports use `importlib.import_module("jkey.2fa...")` — normal `from jkey.2fa import ...` is invalid syntax. All three `ls` subcommands (`2fa ls`, `pm ls`, `rc ls`) return structured data from their core functions; `cli.py` handles printing (sorted alphabetically, case-insensitive keyword filtering). Other commands print internally within their domain modules.
 
 ### Encryption Format
 
