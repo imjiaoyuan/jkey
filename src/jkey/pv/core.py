@@ -28,16 +28,17 @@ _INVALID_FS_CHARS = '<>:"/\\|?*'
 
 def _check_password_strength(password: str) -> tuple[bool, str]:
     if len(password) < 8:
-        return False, "Password is too short (minimum 8 characters recommended)."
+        return False, "Password must be at least 8 characters."
     has_upper = any(c.isupper() for c in password)
     has_lower = any(c.islower() for c in password)
     has_digit = any(c.isdigit() for c in password)
     has_special = any(not c.isalnum() for c in password)
     strength_count = sum([has_upper, has_lower, has_digit, has_special])
-    if len(password) < 12:
-        return False, "Password should be at least 12 characters for better security."
-    if strength_count < 3:
-        return False, "Password should include uppercase, lowercase, digits, and special characters."
+    if len(password) < 12 and strength_count < 3:
+        return False, (
+            "Password should be at least 12 characters or include more character types "
+            "(upper, lower, digits, special)."
+        )
     return True, ""
 
 
@@ -134,11 +135,8 @@ def _read_jkey(path: str) -> dict | None:
     if not os.path.exists(path):
         return None
     with _lock_vault(shared=True):
-        try:
-            with open(path, "r") as f:
-                return json.load(f)
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError):
-            return None
+        with open(path, "r") as f:
+            return json.load(f)
 
 
 def _write_jkey(path: str, encrypted: dict):
@@ -167,17 +165,25 @@ def _vault_exists() -> bool:
     return any(os.path.exists(p) for p in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE))
 
 
-def _decrypt_any_vault_file(password: str) -> bool:
+def _verify_all_vault_files(password: str) -> bool:
+    any_exists = False
     for path in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE):
-        if os.path.exists(path):
-            if _decrypt_file(path, password) is not None:
-                return True
-    return False
+        if not os.path.exists(path):
+            continue
+        any_exists = True
+        try:
+            encrypted = _read_jkey(path)
+        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
+            print(f"Error: vault file corrupted: {path}: {e}", file=sys.stderr)
+            return False
+        if aes.decrypt(encrypted, password) is None:
+            return False
+    return any_exists
 
 
 def _unlock_all(password: str) -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
-    if not _decrypt_any_vault_file(password):
+    if not _verify_all_vault_files(password):
         return False
     _totp_cache = _decrypt_file(TOTP_FILE, password) or {}
     _passwords_cache = _decrypt_file(PASSWORDS_FILE, password) or {}
@@ -188,7 +194,7 @@ def _unlock_all(password: str) -> bool:
 
 
 def verify_password(password: str) -> bool:
-    return _decrypt_any_vault_file(password)
+    return _verify_all_vault_files(password)
 
 
 def _ensure_unlocked():
