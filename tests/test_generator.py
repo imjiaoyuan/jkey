@@ -1,4 +1,3 @@
-
 import pytest
 
 from jkey.pm.get import _SYMBOLS as SYMBOLS
