@@ -77,7 +77,7 @@ class TestSession:
         _encrypt_file(RECOVERY_FILE, {"c": 3}, "pw")
 
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
-        assert _load_session("pw") is True
+        assert _load_session() is True
         from jkey.pv.core import _passwords_cache, _recovery_cache, _session_password, _totp_cache
 
         assert _session_password == "pw"
@@ -88,7 +88,7 @@ class TestSession:
     def test_no_session_file(self, vault_dir):
         from jkey.pv.core import _load_session
 
-        assert _load_session("pw") is False
+        assert _load_session() is False
 
     def test_expired_session(self, vault_dir):
         import jkey.pv.core as core
@@ -98,26 +98,28 @@ class TestSession:
         from unittest.mock import patch
 
         with patch("jkey.pv.core.time.time", return_value=now + core.SESSION_TIMEOUT + 1):
-            assert core._load_session("pw") is False
+            assert core._load_session() is False
         assert not os.path.exists(core.SESSION_FILE)
 
-    def test_session_file_not_plaintext(self, vault_dir):
+    def test_session_file_format(self, vault_dir):
         from jkey.pv.core import SESSION_FILE, _save_session
 
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
         with open(SESSION_FILE) as f:
             raw = json.load(f)
-        assert "session" in raw
-        dumped = json.dumps(raw)
-        assert "\"password\"" not in dumped
-        assert "\"totp\"" not in dumped
+        assert raw["sv"] == 3
+        assert raw["password"] == "pw"
+        assert raw["totp"] == {"a": 1}
+        assert raw["passwords"] == {"b": 2}
+        assert raw["recovery"] == {"c": 3}
+        assert "expires" in raw
 
     def test_corrupted_session(self, vault_dir):
         from jkey.pv.core import SESSION_FILE, _load_session
 
         with open(SESSION_FILE, "w") as f:
             f.write("not json")
-        assert _load_session("pw") is False
+        assert _load_session() is False
 
 
 class TestUnlockAll:
@@ -291,7 +293,7 @@ class TestEnsureUnlocked:
         monkeypatch.setattr("getpass.getpass", lambda p="": "wrong-too")
         assert _ensure_unlocked() is False
 
-    def test_with_session(self, vault_dir, monkeypatch):
+    def test_with_session(self, vault_dir):
         from jkey.pv.core import (
             TOTP_FILE,
             _encrypt_file,
@@ -301,7 +303,6 @@ class TestEnsureUnlocked:
 
         _encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
         _save_session("pw", {"a": "b"}, {}, {})
-        monkeypatch.setenv("JKEY_PASS", "pw")
         assert _ensure_unlocked() is True
 
 
@@ -334,7 +335,7 @@ class TestPromptPassword:
 
 
 class TestSessionV2:
-    def test_save_and_load_with_sv2(self, vault_dir):
+    def test_save_and_load_sv3(self, vault_dir):
         import jkey.pv.core as core
 
         core._encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
@@ -344,30 +345,41 @@ class TestSessionV2:
         core._save_session("pw", {"a": 1}, {}, {})
         with open(core.SESSION_FILE) as f:
             raw = json.load(f)
-        assert raw.get("sv") == 2
-        assert core._load_session("pw") is True
+        assert raw["sv"] == 3
+        assert core._load_session() is True
 
-    def test_backward_compat_sv1(self, vault_dir):
+    def test_activity_based_timeout_reset(self, vault_dir):
         import jkey.pv.core as core
-        from jkey import aes
+
+        core._encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
+        core._encrypt_file(core.PASSWORDS_FILE, {}, "pw")
+        core._encrypt_file(core.RECOVERY_FILE, {}, "pw")
+
+        core._save_session("pw", {"a": 1}, {}, {})
+        original_expires = json.load(open(core.SESSION_FILE))["expires"]
+
+        import time as _time
+        _time.sleep(0.01)
+
+        assert core._load_session() is True
+        new_expires = json.load(open(core.SESSION_FILE))["expires"]
+        assert new_expires > original_expires
+
+    def test_old_session_rejected(self, vault_dir):
+        import jkey.pv.core as core
 
         core._encrypt_file(core.TOTP_FILE, {"old": "data"}, "pw")
-        core._encrypt_file(core.PASSWORDS_FILE, {"old": "data"}, "pw")
-        core._encrypt_file(core.RECOVERY_FILE, {"old": "data"}, "pw")
-
-        payload = {
-            "expires": core.time.time() + core.SESSION_TIMEOUT,
+        old_session = {
+            "sv": 2,
             "password": "pw",
             "totp": {"old": "data"},
-            "passwords": {"old": "data"},
-            "recovery": {"old": "data"},
+            "passwords": {},
+            "recovery": {},
+            "expires": core.time.time() + 300,
         }
-        old_session = aes.encrypt(payload, core._session_secret("pw"))
         with open(core.SESSION_FILE, "w") as f:
-            json.dump({"session": old_session}, f)
-        assert core._load_session("pw") is True
-        assert core._session_password == "pw"
-        assert core._totp_cache == {"old": "data"}
+            json.dump(old_session, f)
+        assert core._load_session() is False
 
 
 class TestSaveWhenLocked:
