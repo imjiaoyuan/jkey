@@ -98,7 +98,7 @@ class TestExportPaths:
         args = type("Args", (), {"type": "totp", "output": None})
         mod.cmd_export(args)
         captured = capsys.readouterr()
-        assert "\"github\"" in captured.out
+        assert '"github"' in captured.out
 
     def test_export_qr_writes_images(self, monkeypatch, tmp_path, capsys):
         mod = importlib.import_module("jkey.pv.export")

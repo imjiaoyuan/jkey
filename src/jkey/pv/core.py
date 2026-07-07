@@ -79,6 +79,7 @@ def _password_from_env() -> str | None:
 
 def _prompt_password(prompt: str = "Master password: ") -> str:
     import getpass
+
     return getpass.getpass(prompt)
 
 
@@ -206,7 +207,7 @@ def _ensure_unlocked():
         return False
     for attempt in range(3):
         if attempt > 0:
-            time.sleep(2 ** attempt)
+            time.sleep(2**attempt)
         pw = _prompt_password()
         if _unlock_all(pw):
             return True
@@ -338,5 +339,5 @@ def list_qr_images() -> list[str]:
     names = []
     for f in os.listdir(QR_DIR):
         if f.endswith(_JKEY_EXT):
-            names.append(f[:-len(_JKEY_EXT)])
+            names.append(f[: -len(_JKEY_EXT)])
     return sorted(names)

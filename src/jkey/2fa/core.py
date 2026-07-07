@@ -9,9 +9,9 @@ import time
 def _hotp(secret: bytes, counter: int, digits: int = 6) -> str:
     msg = struct.pack(">Q", counter)
     h = hmac.new(secret, msg, hashlib.sha1).digest()
-    offset = h[-1] & 0xf
-    truncated = struct.unpack(">I", h[offset:offset+4])[0] & 0x7fffffff
-    return str(truncated % (10 ** digits)).zfill(digits)
+    offset = h[-1] & 0xF
+    truncated = struct.unpack(">I", h[offset : offset + 4])[0] & 0x7FFFFFFF
+    return str(truncated % (10**digits)).zfill(digits)
 
 
 def _b32_decode(s: str) -> bytes:
