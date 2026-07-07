@@ -21,9 +21,7 @@ def cmd_export(args):
         return
 
     env_pw = _password_from_env()
-    if env_pw and verify_password(env_pw):
-        pass
-    else:
+    if not env_pw or not verify_password(env_pw):
         pw = getpass.getpass("Confirm master password to export: ")
         if not verify_password(pw):
             print("Incorrect password. Export cancelled.")

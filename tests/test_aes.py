@@ -44,7 +44,7 @@ class TestEncryptDecrypt:
         data = {"key": "value"}
         encrypted = aes.encrypt(data, "password")
         ct = bytearray(base64.b64decode(encrypted["data"]))
-        ct[0] ^= 0xff
+        ct[0] ^= 0xFF
         encrypted["data"] = base64.b64encode(bytes(ct)).decode()
         assert aes.decrypt(encrypted, "password") is None
 
@@ -52,7 +52,7 @@ class TestEncryptDecrypt:
         data = {"key": "value"}
         encrypted = aes.encrypt(data, "password")
         mac = bytearray(base64.b64decode(encrypted["mac"]))
-        mac[0] ^= 0xff
+        mac[0] ^= 0xFF
         encrypted["mac"] = base64.b64encode(bytes(mac)).decode()
         assert aes.decrypt(encrypted, "password") is None
 

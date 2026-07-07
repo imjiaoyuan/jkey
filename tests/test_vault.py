@@ -23,7 +23,6 @@ class TestReadWriteJkey:
     def test_write_and_read(self, vault_dir):
         from jkey.pv.core import _read_jkey, _write_jkey
 
-
         data = {"hello": "world"}
         encrypted = aes.encrypt(data, "pw")
         path = os.path.join(vault_dir, "test.jkey")
@@ -359,6 +358,7 @@ class TestSessionV2:
         original_expires = json.load(open(core.SESSION_FILE))["expires"]
 
         import time as _time
+
         _time.sleep(0.01)
 
         assert core._load_session() is True

@@ -1,5 +1,3 @@
-
-
 class TestRcAdd:
     def test_add_from_file(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
