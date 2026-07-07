@@ -13,6 +13,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `uv run pytest tests/` — Run all tests with coverage
 - `uv run pytest tests/ -k "test_name"` — Run a single test by name pattern
 - `uv run ruff check src/ tests/` — Lint
+- `uv run ruff format src/ tests/` — Format
 - `uv build` — Build distribution packages
 
 ### 2FA
@@ -137,7 +138,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ### File I/O (Atomic Writes)
 
-`_write_jkey()` writes to a `.tmp` file then uses `os.replace()` (atomic on POSIX). Stale `.tmp` files from crashed writes are silently removed on next write. Files are created with mode 600. QR image filenames are sanitized by replacing invalid filesystem characters (`<>:"/\|?*`) with underscores.
+`_write_jkey()` writes to a `.tmp` file with `O_TRUNC` (overwrites any stale tmp from crashed writes), then uses `os.replace()` (atomic on POSIX). Under exclusive `_lock_vault()`, no race condition. Files created with mode 600. QR image filenames sanitized by replacing invalid filesystem characters (`<>:"/\|?*`) with underscores.
 
 ### Password Generation
 
