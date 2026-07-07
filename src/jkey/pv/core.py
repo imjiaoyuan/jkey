@@ -1,7 +1,6 @@
 import base64
 import contextlib
 import fcntl
-import hashlib
 import json
 import os
 import platform
@@ -69,11 +68,6 @@ _passwords_cache: dict | None = None
 _recovery_cache: dict | None = None
 
 
-def _session_secret(password: str) -> str:
-    material = f"jkey-session-v1:{password}"
-    return hashlib.sha256(material.encode("utf-8")).hexdigest()
-
-
 def _ensure_dir():
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     os.makedirs(QR_DIR, mode=0o700, exist_ok=True)
@@ -91,50 +85,39 @@ def _prompt_password(prompt: str = "Master password: ") -> str:
 def _save_session(password, totp, passwords, recovery):
     _ensure_dir()
     payload = {
-        "expires": time.time() + SESSION_TIMEOUT,
+        "sv": 3,
         "password": password,
         "totp": totp,
         "passwords": passwords,
         "recovery": recovery,
+        "expires": time.time() + SESSION_TIMEOUT,
     }
     try:
         with open(SESSION_FILE, "w") as f:
-            json.dump({"session": aes.encrypt(payload, password), "sv": 2}, f)
+            json.dump(payload, f)
         os.chmod(SESSION_FILE, 0o600)
     except OSError as e:
         print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
 
 
-def _load_session(password: str) -> bool:
+def _load_session() -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
     try:
         with open(SESSION_FILE) as f:
-            raw = json.load(f)
-        if isinstance(raw, dict) and "session" in raw:
-            sv = raw.get("sv", 1)
-            if sv >= 2:
-                data = aes.decrypt(raw["session"], password)
-            else:
-                data = aes.decrypt(raw["session"], _session_secret(password))
-            if data is None:
-                _clear_session()
-                return False
-        else:
-            data = raw
-        if time.time() >= data["expires"]:
-            os.unlink(SESSION_FILE)
-            return False
-        stored_password = data["password"]
-        if stored_password != password:
-            _clear_session()
-            return False
-        _session_password = password
-        _totp_cache = data["totp"]
-        _passwords_cache = data["passwords"]
-        _recovery_cache = data["recovery"]
-        return True
-    except (OSError, json.JSONDecodeError, KeyError, TypeError):
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
         return False
+    if not isinstance(data, dict) or data.get("sv", 1) < 3:
+        return False
+    if time.time() >= data["expires"]:
+        _clear_session()
+        return False
+    _session_password = data["password"]
+    _totp_cache = data["totp"]
+    _passwords_cache = data["passwords"]
+    _recovery_cache = data["recovery"]
+    _save_session(_session_password, _totp_cache, _passwords_cache, _recovery_cache)
+    return True
 
 
 def _clear_session():
@@ -161,14 +144,7 @@ def _write_jkey(path: str, encrypted: dict):
     _ensure_dir()
     tmp = path + ".tmp"
     with _lock_vault():
-        try:
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-        except FileExistsError:
-            try:
-                os.unlink(tmp)
-            except OSError:
-                pass
-            fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w") as f:
             json.dump(encrypted, f, indent=4, ensure_ascii=False)
         os.replace(tmp, path)
@@ -217,13 +193,13 @@ def verify_password(password: str) -> bool:
 def _ensure_unlocked():
     if is_unlocked():
         return True
+    if _load_session():
+        return True
     if not _vault_exists():
         print("Error: Vault not initialized. Run 'jkey pv init' first.")
         return False
     pw = _password_from_env()
     if pw:
-        if _load_session(pw):
-            return True
         if _unlock_all(pw):
             return True
         print("Error: JKEY_PASS environment variable contains incorrect password.")
@@ -232,8 +208,6 @@ def _ensure_unlocked():
         if attempt > 0:
             time.sleep(2 ** attempt)
         pw = _prompt_password()
-        if _load_session(pw):
-            return True
         if _unlock_all(pw):
             return True
         print("Incorrect password. Try again.")
@@ -291,9 +265,6 @@ def save_totp(data: dict):
 def load_passwords() -> dict | None:
     if not _ensure_unlocked():
         return None
-    global _passwords_cache
-    if _passwords_cache is None and _session_password is not None:
-        _passwords_cache = _decrypt_file(PASSWORDS_FILE, _session_password) or {}
     return _passwords_cache
 
 
@@ -311,9 +282,6 @@ def save_passwords(data: dict):
 def load_recovery() -> dict | None:
     if not _ensure_unlocked():
         return None
-    global _recovery_cache
-    if _recovery_cache is None and _session_password is not None:
-        _recovery_cache = _decrypt_file(RECOVERY_FILE, _session_password) or {}
     return _recovery_cache
 
 

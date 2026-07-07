@@ -1,3 +1,5 @@
+import os
+
 from jkey.pv.core import (
     CONFIG_DIR,
     PASSWORDS_FILE,
@@ -9,7 +11,7 @@ from jkey.pv.core import (
 
 def cmd_status():
     vault_exists = any(
-        __import__("os").path.exists(p)
+        os.path.exists(p)
         for p in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE)
     )
     unlocked = is_unlocked()
