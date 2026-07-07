@@ -54,10 +54,12 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey pm ls [keyword]` | List stored passwords |
 | `jkey pm get [-L N]` | Generate a random password |
 | `jkey pm add <name>` | Store a password (prompts for input) |
+| `jkey pm edit <name>` | Update an existing password |
 | `jkey pm rm <name>` | Delete a stored password |
 | `jkey pv init` | Initialize the encrypted vault |
 | `jkey pv unlock` | Unlock the vault |
 | `jkey pv lock` | Lock the vault |
+| `jkey pv status` | Show vault status |
 | `jkey pv set-pw` | Change master password |
 | `jkey pv encrypt <file>` | Encrypt a file |
 | `jkey pv decrypt <file>` | Decrypt a `.jkey` file |
