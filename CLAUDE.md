@@ -56,7 +56,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 src/
 └── jkey/
     ├── __init__.py
-    ├── __main__.py              # python -m jkey entry (calls cli.main())
+    ├── __main__.py              # python -m jkey entry point (calls cli.main())
     ├── cli.py                   # argparse CLI entry (lazy imports)
     ├── aes.py                   # AES-256-CBC + HMAC pure Python implementation
     ├── 2fa/
@@ -97,7 +97,7 @@ tests/
 └── test_vault_commands.py       # Vault CLI commands: init, unlock, lock, status, set-pw
 .github/
 └── workflows/
-    ├── ci.yml                   # CI: ruff lint + pytest (py3.10–3.14)
+    ├── ci.yml                   # CI: ruff lint, pytest (py3.10–3.14), uv build
     └── publish.yml              # PyPI publish (tag + manual trigger)
 ```
 
@@ -112,7 +112,7 @@ CLI (cli.py) → Domain modules (2fa/ pm/ rc/) → Vault core (pv/core.py) → C
 - **`aes.py`** — Pure-Python AES-256-CBC + HMAC-SHA256. Has zero external dependencies. Exposes only `encrypt(dict, password) → dict` and `decrypt(dict, password) → dict | None`. All internal functions (`_key_expansion`, `_encrypt_block`, `_pkcs7_pad`, etc.) are private. PBKDF2-HMAC-SHA256 with 600,000 iterations.
 - **`pv/core.py`** — Vault session manager and the sole data-access layer. Module-level globals (`_session_password`, `_totp_cache`, `_passwords_cache`, `_recovery_cache`) track unlocked state. All domain modules read/write through its `load_*`/`save_*` functions. Also manages QR image storage. Uses `fcntl.flock` for concurrent access protection (shared locks for reads, exclusive for writes; no-op on Windows).
 - **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly.
-- **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked. This avoids loading `opencv-python-headless` (heavy) when the user only needs `pm ls` or `pv unlock`. The `pm ls` and `rc ls` subcommands return structured data from their core functions and do the printing in `cli.py`; other commands still print internally.
+- **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked, keeping startup fast. All three `ls` subcommands (`2fa ls`, `pm ls`, `rc ls`) return structured data from their core functions; `cli.py` handles printing. Other commands print internally within their domain modules.
 
 ### Encryption Format
 
@@ -127,11 +127,12 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ### Session Management
 
-- On unlock, the master password is cached in memory (`_session_password`) and persisted to `~/.config/jkey/.session` (mode 600) with a 5-minute TTL (configurable via `JKEY_SESSION_TIMEOUT` env var).
-- The `.session` file is itself encrypted: session version `sv=2` encrypts the session blob with the password; older `sv=1` used a SHA-256 hash of the password as the encryption key.
-- On next use, `_load_session()` is tried first (fast path). If it fails or expired, falls back to `_unlock_all()` which re-decrypts vault files.
+- On unlock, the master password and decrypted vault data are cached in memory (`_session_password`, `_totp_cache`, etc.) and persisted to `~/.config/jkey/.session` (mode 600) with a 5-minute TTL (configurable via `JKEY_SESSION_TIMEOUT` env var).
+- Session format `sv=3`: plain JSON with `password`, `totp`, `passwords`, `recovery`, `expires` fields. Protected by filesystem permissions (mode 600), same threat model as the vault files. Older `sv=2`/`sv=1` formats (encrypted sessions) are rejected — user re-enters password once after upgrade.
+- On next CLI invocation, `_load_session()` reads the session file directly without requiring the master password — like `sudo`'s timestamp mechanism. Timeout resets on each successful use (activity-based).
+- If session is missing, expired, or old format: falls back to `_unlock_all()` which re-decrypts vault files and saves a new sv=3 session.
 - Failed password attempts use exponential backoff (2^attempt seconds), max 3 attempts.
-- `JKEY_PASS` env var is checked first; if wrong, falls through to interactive prompt.
+- `JKEY_PASS` env var is checked after session load fails; if wrong, falls through to interactive prompt.
 - Export commands re-verify the master password via `getpass` even when unlocked, as a safety measure. `JKEY_PASS` satisfies this re-verification.
 
 ### File I/O (Atomic Writes)
@@ -140,7 +141,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ### Password Generation
 
-`pm/get.py` uses Python's `secrets` module (CSPRNG). Character sets: lowercase, uppercase, digits, and `!@#$%^&*`. At least one character set must be enabled; length must be ≥ the number of enabled sets (one guaranteed char per set). Raises `ValueError` on invalid config.
+`pm/get.py` uses Python's `secrets` module (CSPRNG). Character sets: lowercase, uppercase, digits, and `!@#$%^&*()_+-=[]{}|;:,.<>?/`. At least one character set must be enabled; length must be ≥ the number of enabled sets (one guaranteed char per set). Raises `ValueError` on invalid config.
 
 ### Vault Initialization
 
@@ -164,7 +165,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ```
 ~/.config/jkey/
-├── .session           # Encrypted session cache (5 min timeout, mode 600)
+├── .session           # Session cache — plain JSON, mode 600 (5 min activity-based timeout)
 ├── .lock              # fcntl lock file (POSIX only)
 ├── totp.jkey          # Encrypted TOTP secrets: {name: base32_secret}
 ├── passwords.jkey     # Encrypted passwords: {name: password}
