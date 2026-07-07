@@ -510,5 +510,5 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         plaintext = _pkcs7_unpad(padded)
         return json.loads(plaintext.decode("utf-8"))
     except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as e:
-        print(f"Warning: decryption integrity check failed: {e}", file=sys.stderr)
+        print(f"Warning: decryption failed — malformed plaintext: {e}", file=sys.stderr)
         return None
