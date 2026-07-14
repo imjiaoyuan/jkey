@@ -1,21 +1,26 @@
 import base64
 import json
 import os
+import sys
 
-import jkey.pv.core as core
 from jkey import aes
+from jkey.pv.core import _ensure_unlocked, _read_jkey, get_session_password
 
 
 def decrypt_file(path: str, output_path: str | None = None):
     if not os.path.exists(path):
         print(f"Error: File not found: {path}")
         return
-    if not core._ensure_unlocked():
+    if not _ensure_unlocked():
         return
-    encrypted = core._read_jkey(path)
+    password = get_session_password()
+    if password is None:
+        print("Error: Vault is locked.", file=sys.stderr)
+        return
+    encrypted = _read_jkey(path)
     if encrypted is None:
         return
-    data = aes.decrypt(encrypted, core._session_password)
+    data = aes.decrypt(encrypted, password)
     if data is None:
         print("Error: Decryption failed.")
         return

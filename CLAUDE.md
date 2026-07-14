@@ -35,6 +35,7 @@ CI (`.github/workflows/ci.yml`) runs lint on Python 3.13 and tests on 3.10–3.1
 - `uv run jkey pm add <name>` — Store a password (interactive input)
 - `uv run jkey pm edit <name>` — Update an existing password (interactive input)
 - `uv run jkey pm rm <name>` — Delete a password
+- `uv run jkey pm import <file.csv> [-n] [-v] [--replace] [-d skip|overwrite|rename]` — Import passwords from browser CSV export
 
 ### Vault
 - `uv run jkey pv init` — Initialize vault (set master password)
@@ -77,6 +78,7 @@ src/
     │   ├── add.py               # Store password
     │   ├── edit.py              # Update existing password
     │   ├── get.py               # Generate random password (secrets module)
+    │   ├── import_csv.py        # Import passwords from browser CSV export
     │   ├── ls.py                # List passwords
     │   └── rm.py                # Delete password
     └── pv/
@@ -118,7 +120,7 @@ CLI (cli.py) → Domain modules (2fa/ pm/ rc/) → Vault core (pv/core.py) → C
 
 - **`aes.py`** — Pure-Python AES-256-CBC + HMAC-SHA256. Has zero external dependencies. Exposes only `encrypt(dict, password) → dict` and `decrypt(dict, password) → dict | None`. All internal functions (`_key_expansion`, `_encrypt_block`, `_pkcs7_pad`, etc.) are private. PBKDF2-HMAC-SHA256 with 600,000 iterations.
 - **`pv/core.py`** — Vault session manager and the sole data-access layer. Module-level globals (`_session_password`, `_totp_cache`, `_passwords_cache`, `_recovery_cache`) track unlocked state. All domain modules read/write through its `load_*`/`save_*` functions. Also manages QR image storage. Uses `fcntl.flock` for concurrent access protection (shared locks for reads, exclusive for writes; no-op on Windows).
-- **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly.
+- **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly. `pm/import_csv.py` handles browser CSV password imports with encoding auto-detection (utf-8-sig, utf-8, utf-16, latin-1), flexible column-alias matching (20+ recognized header names across name/url/username/password), and three duplicate-resolution modes (skip/overwrite/rename).
 - **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked, keeping startup fast. Because the `2fa` package name starts with a digit, imports use `importlib.import_module("jkey.2fa...")` — normal `from jkey.2fa import ...` is invalid syntax. All three `ls` subcommands (`2fa ls`, `pm ls`, `rc ls`) return structured data from their core functions; `cli.py` handles printing (sorted alphabetically, case-insensitive keyword filtering). Other commands print internally within their domain modules.
 
 ### Encryption Format
@@ -156,6 +158,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 
 ### Key Conventions
 
+- **Vault-first data access:** domain modules never read/write encrypted files or touch `aes.py` directly. All data access goes through `pv.core` load/save APIs (`load_totp`, `save_totp`, `load_passwords`, `save_passwords`, `load_recovery`, `save_recovery`).
 - **CLI handlers print-and-return:** operational failures are surfaced as user-facing messages and early returns, not raised exceptions. Domain modules should follow the same pattern.
 - **Cross-feature account removal:** removing a 2FA account (`2fa rm`) also prompts to delete matching recovery codes. Keep this coupling in mind when modifying either domain.
 - **Dynamic imports for `2fa`:** because `2fa` starts with a digit, `from jkey.2fa import ...` is invalid Python syntax. Always use `importlib.import_module("jkey.2fa...")` — the CLI already does this, and tests follow the same pattern.
