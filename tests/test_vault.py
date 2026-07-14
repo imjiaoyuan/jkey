@@ -39,16 +39,16 @@ class TestReadWriteJkey:
 
         assert _read_jkey("/nonexistent/path.jkey") is None
 
-    def test_read_empty_file(self, vault_dir):
-        import json
-
+    def test_read_empty_file(self, vault_dir, capsys):
         from jkey.pv.core import _read_jkey
 
         path = os.path.join(vault_dir, "empty.jkey")
         with open(path, "w") as f:
             f.write("")
-        with pytest.raises(json.JSONDecodeError):
-            _read_jkey(path)
+        result = _read_jkey(path)
+        assert result is None
+        captured = capsys.readouterr()
+        assert "cannot read vault file" in captured.err
 
 
 class TestEncryptDecryptFile:

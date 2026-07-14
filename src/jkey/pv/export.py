@@ -1,12 +1,14 @@
 import csv
 import getpass
 import io
-import json
 import os
+import sys
 
 from jkey.pv.core import (
     _ensure_unlocked,
     _password_from_env,
+    _write_secure_bytes,
+    _write_secure_text,
     list_qr_images,
     load_passwords,
     load_qr_image,
@@ -14,6 +16,81 @@ from jkey.pv.core import (
     load_totp,
     verify_password,
 )
+
+
+def _export_totp(output: str | None) -> None:
+    data = load_totp()
+    if data is None:
+        return
+    out = _build_totp_content(data)
+    if output:
+        _write_secure_text(output, out)
+        print(f"Exported TOTP secrets to {output}")
+    else:
+        print(out, end="")
+
+
+def _build_totp_content(data: dict) -> str:
+    import json
+
+    return json.dumps(data, indent=4, ensure_ascii=False) + "\n"
+
+
+def _export_passwords(output: str | None) -> None:
+    data = load_passwords()
+    if data is None:
+        return
+    out = _build_passwords_content(data)
+    if output:
+        _write_secure_text(output, out, newline="")
+        print(f"Exported passwords to {output}")
+    else:
+        print(out, end="")
+
+
+def _build_passwords_content(data: dict) -> str:
+    buf = io.StringIO()
+    w = csv.writer(buf)
+    w.writerow(["name", "password"])
+    for name, pw_val in sorted(data.items()):
+        w.writerow([name, pw_val])
+    return buf.getvalue()
+
+
+def _export_recovery(output: str | None) -> None:
+    data = load_recovery()
+    if data is None:
+        return
+    out = _build_recovery_content(data)
+    if output:
+        _write_secure_text(output, out + "\n")
+        print(f"Exported recovery codes to {output}")
+    else:
+        print(out)
+
+
+def _build_recovery_content(data: dict) -> str:
+    lines = []
+    for account in sorted(data.keys()):
+        lines.append(f"Account: {account}")
+        for code in data[account]:
+            lines.append(f"  {code}")
+        lines.append("")
+    return "\n".join(lines)
+
+
+def _export_qr(output_dir: str) -> None:
+    os.makedirs(output_dir, mode=0o700, exist_ok=True)
+    names = list_qr_images()
+    if not names:
+        print("No QR images found.")
+        return
+    for name in names:
+        img = load_qr_image(name)
+        if img:
+            path = os.path.join(output_dir, f"{name}.jpg")
+            _write_secure_bytes(path, img)
+    print(f"Exported {len(names)} QR images to {output_dir}")
 
 
 def cmd_export(args):
@@ -31,74 +108,16 @@ def cmd_export(args):
     output = args.output
 
     if t == "totp":
-        data = load_totp()
-        if data is None:
-            return
-        out = json.dumps(data, indent=4, ensure_ascii=False) + "\n"
-        if output:
-            with open(output, "w", encoding="utf-8") as f:
-                f.write(out)
-            os.chmod(output, 0o600)
-            print(f"Exported TOTP secrets to {output}")
-        else:
-            print(out, end="")
-
+        _export_totp(output)
     elif t == "passwords":
-        data = load_passwords()
-        if data is None:
-            return
-        buf = io.StringIO()
-        w = csv.writer(buf)
-        w.writerow(["name", "password"])
-        for name, pw_val in sorted(data.items()):
-            w.writerow([name, pw_val])
-        out = buf.getvalue()
-        if output:
-            with open(output, "w", encoding="utf-8", newline="") as f:
-                f.write(out)
-            os.chmod(output, 0o600)
-            print(f"Exported passwords to {output}")
-        else:
-            print(out, end="")
-
+        _export_passwords(output)
     elif t == "recovery":
-        data = load_recovery()
-        if data is None:
-            return
-        lines = []
-        for account in sorted(data.keys()):
-            lines.append(f"Account: {account}")
-            for code in data[account]:
-                lines.append(f"  {code}")
-            lines.append("")
-        out = "\n".join(lines)
-        if output:
-            with open(output, "w", encoding="utf-8") as f:
-                f.write(out)
-                f.write("\n")
-            os.chmod(output, 0o600)
-            print(f"Exported recovery codes to {output}")
-        else:
-            print(out)
-
+        _export_recovery(output)
     elif t == "qr":
         if not output:
             print("Error: -o <directory> required for QR export.")
             return
-        os.makedirs(output, mode=0o700, exist_ok=True)
-        names = list_qr_images()
-        if not names:
-            print("No QR images found.")
-            return
-        for name in names:
-            img = load_qr_image(name)
-            if img:
-                path = os.path.join(output, f"{name}.jpg")
-                with open(path, "wb") as f:
-                    f.write(img)
-                os.chmod(path, 0o600)
-        print(f"Exported {len(names)} QR images to {output}")
-
+        _export_qr(output)
     elif t == "all":
         if not output:
             print("Error: -o <directory> required for full export.")
@@ -108,33 +127,19 @@ def cmd_export(args):
         totp_data = load_totp()
         if totp_data:
             p = os.path.join(output, "totp.json")
-            with open(p, "w", encoding="utf-8") as f:
-                json.dump(totp_data, f, indent=4, ensure_ascii=False)
-                f.write("\n")
-            os.chmod(p, 0o600)
+            _write_secure_text(p, _build_totp_content(totp_data))
             print(f"  {p}")
 
         pw_data = load_passwords()
         if pw_data:
             p = os.path.join(output, "passwords.csv")
-            with open(p, "w", encoding="utf-8", newline="") as f:
-                w = csv.writer(f)
-                w.writerow(["name", "password"])
-                for name, pw_val in sorted(pw_data.items()):
-                    w.writerow([name, pw_val])
-            os.chmod(p, 0o600)
+            _write_secure_text(p, _build_passwords_content(pw_data), newline="")
             print(f"  {p}")
 
         rc_data = load_recovery()
         if rc_data:
             p = os.path.join(output, "recovery.txt")
-            with open(p, "w", encoding="utf-8") as f:
-                for account in sorted(rc_data.keys()):
-                    f.write(f"Account: {account}\n")
-                    for code in rc_data[account]:
-                        f.write(f"  {code}\n")
-                    f.write("\n")
-            os.chmod(p, 0o600)
+            _write_secure_text(p, _build_recovery_content(rc_data) + "\n")
             print(f"  {p}")
 
         qr_dir = os.path.join(output, "qr")
@@ -145,9 +150,7 @@ def cmd_export(args):
                 img = load_qr_image(name)
                 if img:
                     p = os.path.join(qr_dir, f"{name}.jpg")
-                    with open(p, "wb") as f:
-                        f.write(img)
-                    os.chmod(p, 0o600)
+                    _write_secure_bytes(p, img)
             print(f"  {qr_dir}/ ({len(names)} images)")
 
         print(f"Exported to {output}")

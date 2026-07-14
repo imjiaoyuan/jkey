@@ -59,7 +59,7 @@ def _extract_name(row: list[str], mapping: dict[str, int], index: int) -> str:
             try:
                 parsed = urlparse(url)
                 base = parsed.hostname or ""
-            except Exception:
+            except (ValueError, TypeError):
                 pass
             if not base:
                 base = url.removeprefix("https://").removeprefix("http://").rstrip("/")
@@ -93,6 +93,33 @@ def _resolve_duplicate(name: str, data: dict, mode: str) -> tuple[str, bool]:
             n += 1
         return f"{name}-{n}", True
     return name, False
+
+
+def _process_row(row: list[str], mapping: dict[str, int], data: dict, mode: str, index: int) -> dict:
+    max_idx = max(mapping.values())
+    if len(row) <= max_idx:
+        return {"action": "skip", "reason": "short_row"}
+
+    password = row[mapping["password"]].strip()
+    name = _extract_name(row, mapping, index)
+
+    username = ""
+    if "username" in mapping:
+        username = row[mapping["username"]].strip()
+
+    if not password:
+        return {"action": "skip", "reason": "empty_pw", "name": name, "username": username}
+
+    final_name, should_import = _resolve_duplicate(name, data, mode)
+    if not should_import:
+        return {"action": "skip", "reason": "duplicate", "name": name, "final_name": final_name,
+                "username": username, "password": password}
+
+    if final_name in data:
+        return {"action": "overwrite", "name": name, "final_name": final_name,
+                "username": username, "password": password}
+    return {"action": "new", "name": name, "final_name": final_name,
+            "username": username, "password": password}
 
 
 def import_csv(
@@ -153,6 +180,10 @@ def import_csv(
     if replace and not dry_run:
         data.clear()
 
+    if dry_run:
+        _print_dry_run(data_rows, mapping, data, duplicates)
+        return
+
     imported: list[tuple[str, str, str]] = []
     overwritten: list[tuple[str, str, str]] = []
     skipped_empty_pw: list[str] = []
@@ -160,47 +191,33 @@ def import_csv(
     skipped_dup: list[str] = []
 
     for i, row in enumerate(data_rows):
-        max_idx = max(mapping.values())
-        if len(row) <= max_idx:
-            skipped_short += 1
-            if verbose:
-                print(f"  skip short-row {i + 2}: {','.join(row)[:60]}", file=sys.stderr)
+        result = _process_row(row, mapping, data, duplicates, i)
+
+        if result["action"] == "skip":
+            if result["reason"] == "short_row":
+                skipped_short += 1
+                if verbose:
+                    print(f"  skip short-row {i + 2}: {','.join(row)[:60]}", file=sys.stderr)
+            elif result["reason"] == "empty_pw":
+                skipped_empty_pw.append(result["name"])
+                if verbose:
+                    print(f"  skip empty-pw: {result['name']}", file=sys.stderr)
+            elif result["reason"] == "duplicate":
+                skipped_dup.append(result["name"])
+                if verbose:
+                    print(f"  skip duplicate: {result['name']}", file=sys.stderr)
             continue
 
-        password = row[mapping["password"]].strip()
-        name = _extract_name(row, mapping, i)
+        final_name = result["final_name"]
+        username = result["username"]
+        password = result["password"]
 
-        username = ""
-        if "username" in mapping:
-            username = row[mapping["username"]].strip()
-
-        if not password:
-            skipped_empty_pw.append(name)
-            if verbose:
-                print(f"  skip empty-pw: {name}", file=sys.stderr)
-            continue
-
-        final_name, should_import = _resolve_duplicate(name, data, duplicates)
-
-        if dry_run:
-            continue
-
-        if not should_import:
-            skipped_dup.append(name)
-            if verbose:
-                print(f"  skip duplicate: {name}", file=sys.stderr)
-            continue
-
-        if final_name in data:
+        if result["action"] == "overwrite":
             overwritten.append((final_name, username, password))
         else:
             imported.append((final_name, username, password))
 
         data[final_name] = password
-
-    if dry_run:
-        _print_dry_run(data_rows, mapping, data, duplicates)
-        return
 
     if not imported and not overwritten:
         parts = []
@@ -267,35 +284,31 @@ def _print_dry_run(
     print(f"    {'─' * 12} {'─' * 48} {'─' * 32} {'─' * 12}")
 
     for i, row in enumerate(data_rows):
-        max_idx = max(mapping.values())
-        if len(row) <= max_idx:
-            skip_count += 1
+        result = _process_row(row, mapping, existing, mode, i)
+
+        if result["action"] == "skip":
+            if result["reason"] == "short_row":
+                skip_count += 1
+                continue
+            elif result["reason"] == "empty_pw":
+                empty_count += 1
+                print(f"    {'[NO PW]':<12} {result['name']:<48} {result['username']:<32} {'':<12}")
+            elif result["reason"] == "duplicate":
+                skip_count += 1
+                status = "[SKIP]"
+                masked = result["password"][:3] + "***"
+                print(f"    {status:<12} {result['final_name']:<48} {result['username']:<32} {masked:<12}")
             continue
 
-        password = row[mapping["password"]].strip()
-        name = _extract_name(row, mapping, i)
-        username = ""
-        if "username" in mapping:
-            username = row[mapping["username"]].strip()
-
-        if not password:
-            empty_count += 1
-            print(f"    {'[NO PW]':<12} {name:<48} {username:<32} {'':<12}")
-            continue
-
-        final_name, should_import = _resolve_duplicate(name, existing, mode)
-        if not should_import:
-            skip_count += 1
-            status = "[SKIP]"
-        elif final_name in existing:
+        if result["action"] == "overwrite":
             overwrite_count += 1
             status = "[OVERWRITE]"
         else:
             new_count += 1
             status = "[NEW]"
 
-        masked = password[:3] + "***"
-        print(f"    {status:<12} {final_name:<48} {username:<32} {masked:<12}")
+        masked = result["password"][:3] + "***"
+        print(f"    {status:<12} {result['final_name']:<48} {result['username']:<32} {masked:<12}")
 
     print(f"    {'─' * 12} {'─' * 48} {'─' * 32} {'─' * 12}")
     parts = []
