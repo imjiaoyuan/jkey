@@ -42,10 +42,11 @@ def _check_password_strength(password: str) -> tuple[bool, str]:
     return True, ""
 
 
+_SANITIZE_TABLE = str.maketrans({ord(ch): ord("_") for ch in _INVALID_FS_CHARS})
+
+
 def _sanitize_filename(name: str) -> str:
-    for ch in _INVALID_FS_CHARS:
-        name = name.replace(ch, "_")
-    return name
+    return name.translate(_SANITIZE_TABLE)
 
 
 @contextlib.contextmanager
@@ -197,11 +198,31 @@ def _verify_all_vault_files(password: str) -> bool:
 
 def _unlock_all(password: str) -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
-    if not _verify_all_vault_files(password):
+    totp_data = None
+    pw_data = None
+    rc_data = None
+    any_exists = False
+    for path in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE):
+        if not os.path.exists(path):
+            continue
+        any_exists = True
+        encrypted = _read_jkey(path)
+        if encrypted is None:
+            return False
+        decrypted = aes.decrypt(encrypted, password)
+        if decrypted is None:
+            return False
+        if path == TOTP_FILE:
+            totp_data = decrypted
+        elif path == PASSWORDS_FILE:
+            pw_data = decrypted
+        elif path == RECOVERY_FILE:
+            rc_data = decrypted
+    if not any_exists:
         return False
-    _totp_cache = _decrypt_file(TOTP_FILE, password) or {}
-    _passwords_cache = _decrypt_file(PASSWORDS_FILE, password) or {}
-    _recovery_cache = _decrypt_file(RECOVERY_FILE, password) or {}
+    _totp_cache = totp_data or {}
+    _passwords_cache = pw_data or {}
+    _recovery_cache = rc_data or {}
     _session_password = password
     _save_session(password, _totp_cache, _passwords_cache, _recovery_cache)
     return True

@@ -95,8 +95,7 @@ def _resolve_duplicate(name: str, data: dict, mode: str) -> tuple[str, bool]:
     return name, False
 
 
-def _process_row(row: list[str], mapping: dict[str, int], data: dict, mode: str, index: int) -> dict:
-    max_idx = max(mapping.values())
+def _process_row(row: list[str], mapping: dict[str, int], data: dict, mode: str, index: int, max_idx: int) -> dict:
     if len(row) <= max_idx:
         return {"action": "skip", "reason": "short_row"}
 
@@ -190,8 +189,9 @@ def import_csv(
     skipped_short = 0
     skipped_dup: list[str] = []
 
+    max_idx = max(mapping.values())
     for i, row in enumerate(data_rows):
-        result = _process_row(row, mapping, data, duplicates, i)
+        result = _process_row(row, mapping, data, duplicates, i, max_idx)
 
         if result["action"] == "skip":
             if result["reason"] == "short_row":
@@ -283,8 +283,9 @@ def _print_dry_run(
     print(f"    {'STATUS':<12} {'NAME':<48} {'USERNAME':<32} {'PASSWORD':<12}")
     print(f"    {'─' * 12} {'─' * 48} {'─' * 32} {'─' * 12}")
 
+    max_idx = max(mapping.values())
     for i, row in enumerate(data_rows):
-        result = _process_row(row, mapping, existing, mode, i)
+        result = _process_row(row, mapping, existing, mode, i, max_idx)
 
         if result["action"] == "skip":
             if result["reason"] == "short_row":
