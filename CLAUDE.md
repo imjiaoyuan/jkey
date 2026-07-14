@@ -12,11 +12,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `uv sync --group dev` — Install all dependencies including dev tools
 - `uv run pytest tests/` — Run all tests (coverage auto-configured via pyproject.toml)
 - `uv run pytest tests/ -k "test_name"` — Run a single test by name pattern
+- `uv run pytest tests/test_generator.py::TestGeneratePassword::test_default_length` — Run a specific test by path
 - `uv run ruff check src/ tests/` — Lint
 - `uv run ruff format src/ tests/` — Format
 - `uv build` — Build distribution packages
 
-CI (`.github/workflows/ci.yml`) runs lint on Python 3.13 and tests on 3.10–3.14.
+CI (`.github/workflows/ci.yml`) runs lint on Python 3.13 and tests on 3.10–3.14. PyPI publishing (`.github/workflows/publish.yml`) triggers on `v*` tags and manual dispatch via trusted publishing.
 
 ### 2FA
 - `uv run jkey 2fa ls [keyword]` — List accounts and current TOTP codes (case-insensitive filter)
@@ -102,6 +103,9 @@ tests/
 └── workflows/
     ├── ci.yml                   # CI: ruff lint, pytest (py3.10–3.14), uv build
     └── publish.yml              # PyPI publish (tag + manual trigger)
+.claude/
+├── settings.local.json          # Local permission allowlist for dev commands
+└── skills/                      # Custom Claude Code skills (python-expert)
 ```
 
 ## Architecture
@@ -135,7 +139,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 - On next CLI invocation, `_load_session()` reads the session file directly without requiring the master password — like `sudo`'s timestamp mechanism. Timeout resets on each successful use (activity-based).
 - If session is missing, expired, or old format: falls back to `_unlock_all()` which re-decrypts vault files and saves a new sv=3 session.
 - Failed password attempts use exponential backoff (2^attempt seconds), max 3 attempts.
-- `JKEY_PASS` env var is checked after session load fails; if wrong, falls through to interactive prompt.
+- `JKEY_PASS` env var is checked after session load fails; if set but incorrect, returns error (no fallthrough to interactive prompt). Export commands do fall through to interactive re-prompt when `JKEY_PASS` is wrong.
 - Export commands re-verify the master password via `getpass` even when unlocked, as a safety measure. `JKEY_PASS` satisfies this re-verification.
 
 ### File I/O (Atomic Writes)
@@ -149,6 +153,14 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 ### Vault Initialization
 
 `pv/init.py` checks password strength via `_check_password_strength()`: minimum 8 characters, recommends 12+ with 3 of 4 character classes (upper, lower, digit, special).
+
+### Key Conventions
+
+- **CLI handlers print-and-return:** operational failures are surfaced as user-facing messages and early returns, not raised exceptions. Domain modules should follow the same pattern.
+- **Cross-feature account removal:** removing a 2FA account (`2fa rm`) also prompts to delete matching recovery codes. Keep this coupling in mind when modifying either domain.
+- **Dynamic imports for `2fa`:** because `2fa` starts with a digit, `from jkey.2fa import ...` is invalid Python syntax. Always use `importlib.import_module("jkey.2fa...")` — the CLI already does this, and tests follow the same pattern.
+- **List commands share an output pattern:** sort keys alphabetically and apply case-insensitive keyword filtering. `cli.py` handles printing for all three `ls` subcommands.
+- **Test isolation via monkeypatching:** use `conftest.py` fixtures (`vault_dir`, `vault`) rather than touching real `~/.config/jkey`. Tests that need to bypass password prompts set `JKEY_PASS` in the environment.
 
 ## Testing
 
