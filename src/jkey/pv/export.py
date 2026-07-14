@@ -2,7 +2,6 @@ import csv
 import getpass
 import io
 import os
-import sys
 
 from jkey.pv.core import (
     _ensure_unlocked,
