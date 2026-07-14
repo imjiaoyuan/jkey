@@ -49,6 +49,19 @@ class TestParser:
         a.add_argument("name")
         a = p2.add_parser("rm", help="Delete password")
         a.add_argument("name")
+        e = p2.add_parser("edit", help="Update an existing password")
+        e.add_argument("name")
+        i = p2.add_parser("import", help="Import passwords from browser CSV export")
+        i.add_argument("file", help="Path to CSV file")
+        i.add_argument("-n", "--dry-run", action="store_true", help="Preview without saving")
+        i.add_argument("-v", "--verbose", action="store_true", help="Show skipped entries and reasons")
+        i.add_argument("--replace", action="store_true", help="Replace all existing passwords before import")
+        i.add_argument(
+            "-d", "--duplicates",
+            choices=["skip", "overwrite", "rename"],
+            default="skip",
+            help="How to handle duplicate entries (default: skip)",
+        )
 
         p = sub.add_parser("pv", help="Manage encrypted vault")
         p2 = p.add_subparsers(dest="action")
@@ -149,6 +162,26 @@ class TestParser:
         args = parser.parse_args(["pm", "rm", "myapp"])
         assert args.action == "rm"
         assert args.name == "myapp"
+
+    def test_pm_edit(self):
+        parser = self._parser()
+        args = parser.parse_args(["pm", "edit", "myapp"])
+        assert args.action == "edit"
+        assert args.name == "myapp"
+
+    def test_pm_import_default(self):
+        parser = self._parser()
+        args = parser.parse_args(["pm", "import", "passwords.csv"])
+        assert args.action == "import"
+        assert args.file == "passwords.csv"
+        assert args.dry_run is False
+        assert args.duplicates == "skip"
+
+    def test_pm_import_flags(self):
+        parser = self._parser()
+        args = parser.parse_args(["pm", "import", "p.csv", "-n", "-d", "overwrite"])
+        assert args.dry_run is True
+        assert args.duplicates == "overwrite"
 
     def test_pv_init(self):
         parser = self._parser()

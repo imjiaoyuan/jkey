@@ -45,6 +45,17 @@ def main():
     a.add_argument("name")
     e = p2.add_parser("edit", help="Update an existing password")
     e.add_argument("name")
+    i = p2.add_parser("import", help="Import passwords from browser CSV export")
+    i.add_argument("file", help="Path to CSV file")
+    i.add_argument("-n", "--dry-run", action="store_true", help="Preview without saving")
+    i.add_argument("-v", "--verbose", action="store_true", help="Show skipped entries and reasons")
+    i.add_argument("--replace", action="store_true", help="Replace all existing passwords before import")
+    i.add_argument(
+        "-d", "--duplicates",
+        choices=["skip", "overwrite", "rename"],
+        default="skip",
+        help="How to handle duplicate entries (default: skip)",
+    )
 
     p = sub.add_parser("pv", help="Manage encrypted vault")
     p2 = p.add_subparsers(dest="action")
@@ -137,6 +148,7 @@ def _pm(args):
             print(msg)
             return
         print("Warning: displaying stored passwords in plaintext.", file=sys.stderr)
+        print("SITE (USERNAME): PASSWORD")
         for name, pw_val in result.items():
             print(f"{name}: {pw_val}")
     elif a == "get":
@@ -158,8 +170,16 @@ def _pm(args):
         importlib.import_module("jkey.pm.rm").delete_password(args.name)
     elif a == "edit":
         importlib.import_module("jkey.pm.edit").edit_password(args.name)
+    elif a == "import":
+        importlib.import_module("jkey.pm.import_csv").import_csv(
+            args.file,
+            dry_run=args.dry_run,
+            duplicates=args.duplicates,
+            verbose=args.verbose,
+            replace=args.replace,
+        )
     else:
-        print("Usage: jkey pm ls|get|add|rm|edit")
+        print("Usage: jkey pm ls|get|add|rm|edit|import")
 
 
 def _pv(args):
