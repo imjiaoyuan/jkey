@@ -1,6 +1,11 @@
 import argparse
+import importlib
 import sys
 from importlib.metadata import version
+
+
+def _call(mod_name, func_name, *args, **kwargs):
+    return getattr(importlib.import_module(mod_name), func_name)(*args, **kwargs)
 
 
 def main():
@@ -90,117 +95,98 @@ def main():
 
 
 def _2fa(args):
-    import importlib
-
-    a = args.action
-    if a == "ls":
-        result = importlib.import_module("jkey.2fa.ls").list_accounts(args.keyword)
-        if result is None:
-            return
+    routes = {
+        "ls": ("jkey.2fa.ls", "list_accounts", (args.keyword,)),
+        "add": ("jkey.2fa.add", "scan_and_add", (args.image_path,)),
+        "rm": ("jkey.2fa.rm", "remove_account", (args.account,)),
+    }
+    if args.action not in routes:
+        print("Usage: jkey 2fa ls|add|rm")
+        return
+    result = _call(routes[args.action][0], routes[args.action][1], *routes[args.action][2])
+    if args.action == "ls" and result is not None:
         if not result:
             msg = f"No accounts matching '{args.keyword}'." if args.keyword else "No 2FA accounts found."
             print(msg)
-            return
-        for name, code in result:
-            print(f"{name}: {code}")
-    elif a == "add":
-        importlib.import_module("jkey.2fa.add").scan_and_add(args.image_path)
-    elif a == "rm":
-        importlib.import_module("jkey.2fa.rm").remove_account(args.account)
-    else:
-        print("Usage: jkey 2fa ls|add|rm")
+        else:
+            for name, code in result:
+                print(f"{name}: {code}")
 
 
 def _rc(args):
-    import importlib
-
-    a = args.action
-    if a == "add":
-        importlib.import_module("jkey.rc.add").rc_add_file(args.file_path)
-    elif a == "ls":
-        result = importlib.import_module("jkey.rc.ls").rc_list(args.keyword)
-        if result is None:
-            return
+    routes = {
+        "add": ("jkey.rc.add", "rc_add_file", (args.file_path,)),
+        "ls": ("jkey.rc.ls", "rc_list", (args.keyword,)),
+        "rm": ("jkey.rc.rm", "rc_remove", (args.account,)),
+    }
+    if args.action not in routes:
+        print("Usage: jkey rc add|ls|rm")
+        return
+    result = _call(routes[args.action][0], routes[args.action][1], *routes[args.action][2])
+    if args.action == "ls" and result is not None:
         if not result:
             msg = f"No recovery codes matching '{args.keyword}'." if args.keyword else "No recovery codes found."
             print(msg)
-            return
-        for name, codes in result.items():
-            print(f"{name}:")
-            for code in codes:
-                print(f"  {code}")
-    elif a == "rm":
-        importlib.import_module("jkey.rc.rm").rc_remove(args.account)
-    else:
-        print("Usage: jkey rc add|ls|rm")
+        else:
+            for name, codes in result.items():
+                print(f"{name}:")
+                for code in codes:
+                    print(f"  {code}")
 
 
 def _pm(args):
-    import importlib
-
     a = args.action
     if a == "ls":
-        result = importlib.import_module("jkey.pm.ls").list_passwords(args.keyword)
-        if result is None:
-            return
-        if not result:
-            msg = f"No passwords matching '{args.keyword}'." if args.keyword else "No stored passwords found."
-            print(msg)
-            return
-        print("Warning: displaying stored passwords in plaintext.", file=sys.stderr)
-        print("SITE (USERNAME): PASSWORD")
-        for name, pw_val in result.items():
-            print(f"{name}: {pw_val}")
+        result = _call("jkey.pm.ls", "list_passwords", args.keyword)
+        if result is not None:
+            if not result:
+                msg = f"No passwords matching '{args.keyword}'." if args.keyword else "No stored passwords found."
+                print(msg)
+            else:
+                print("Warning: displaying stored passwords in plaintext.", file=sys.stderr)
+                print("SITE (USERNAME): PASSWORD")
+                for name, pw_val in result.items():
+                    print(f"{name}: {pw_val}")
     elif a == "get":
         try:
-            pwd = importlib.import_module("jkey.pm.get").generate_password(
-                length=args.length,
-                uppercase=not args.no_upper,
-                lowercase=not args.no_lower,
-                digits=not args.no_digits,
-                symbols=not args.no_symbols,
-            )
+            pwd = _call("jkey.pm.get", "generate_password",
+                        length=args.length, uppercase=not args.no_upper,
+                        lowercase=not args.no_lower, digits=not args.no_digits,
+                        symbols=not args.no_symbols)
             print(pwd)
         except ValueError as e:
             print(f"Error: {e}")
             sys.exit(1)
     elif a == "add":
-        importlib.import_module("jkey.pm.add").add_password(args.name)
+        _call("jkey.pm.add", "add_password", args.name)
     elif a == "rm":
-        importlib.import_module("jkey.pm.rm").delete_password(args.name)
+        _call("jkey.pm.rm", "delete_password", args.name)
     elif a == "edit":
-        importlib.import_module("jkey.pm.edit").edit_password(args.name)
+        _call("jkey.pm.edit", "edit_password", args.name)
     elif a == "import":
-        importlib.import_module("jkey.pm.import_csv").import_csv(
-            args.file,
-            dry_run=args.dry_run,
-            duplicates=args.duplicates,
-            verbose=args.verbose,
-            replace=args.replace,
-        )
+        _call("jkey.pm.import_csv", "import_csv", args.file,
+              dry_run=args.dry_run, duplicates=args.duplicates,
+              verbose=args.verbose, replace=args.replace)
     else:
         print("Usage: jkey pm ls|get|add|rm|edit|import")
 
 
 def _pv(args):
-    import importlib
-
+    routes = {
+        "init": ("jkey.pv.init", "cmd_init", ()),
+        "unlock": ("jkey.pv.unlock", "cmd_unlock", ()),
+        "lock": ("jkey.pv.lock", "cmd_lock", ()),
+        "status": ("jkey.pv.status", "cmd_status", ()),
+        "set-pw": ("jkey.pv.set_pw", "cmd_set_pw", ()),
+    }
     a = args.action
-    if a == "init":
-        importlib.import_module("jkey.pv.init").cmd_init()
-    elif a == "unlock":
-        importlib.import_module("jkey.pv.unlock").cmd_unlock()
-    elif a == "lock":
-        importlib.import_module("jkey.pv.lock").cmd_lock()
-    elif a == "status":
-        importlib.import_module("jkey.pv.status").cmd_status()
-    elif a == "set-pw":
-        importlib.import_module("jkey.pv.set_pw").cmd_set_pw()
+    if a in routes:
+        _call(routes[a][0], routes[a][1], *routes[a][2])
     elif a == "encrypt":
-        importlib.import_module("jkey.pv.encrypt").encrypt_file(args.input, args.output)
+        _call("jkey.pv.encrypt", "encrypt_file", args.input, args.output)
     elif a == "decrypt":
-        importlib.import_module("jkey.pv.decrypt").decrypt_file(args.input, args.output)
+        _call("jkey.pv.decrypt", "decrypt_file", args.input, args.output)
     elif a == "export":
-        importlib.import_module("jkey.pv.export").cmd_export(args)
+        _call("jkey.pv.export", "cmd_export", args)
     else:
         print("Usage: jkey pv init|unlock|lock|status|set-pw|encrypt|decrypt|export")
