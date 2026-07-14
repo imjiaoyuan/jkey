@@ -135,8 +135,12 @@ def _read_jkey(path: str) -> dict | None:
     if not os.path.exists(path):
         return None
     with _lock_vault(shared=True):
-        with open(path, "r") as f:
-            return json.load(f)
+        try:
+            with open(path, "r") as f:
+                return json.load(f)
+        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+            print(f"Error: cannot read vault file {path}: {e}", file=sys.stderr)
+            return None
 
 
 def _write_jkey(path: str, encrypted: dict):
@@ -147,6 +151,18 @@ def _write_jkey(path: str, encrypted: dict):
         with os.fdopen(fd, "w") as f:
             json.dump(encrypted, f, indent=4, ensure_ascii=False)
         os.replace(tmp, path)
+
+
+def _write_secure_text(path: str, content: str, encoding: str = "utf-8", newline: str | None = None):
+    with open(path, "w", encoding=encoding, newline=newline) as f:
+        f.write(content)
+    os.chmod(path, 0o600)
+
+
+def _write_secure_bytes(path: str, content: bytes):
+    with open(path, "wb") as f:
+        f.write(content)
+    os.chmod(path, 0o600)
 
 
 def _decrypt_file(path: str, password: str) -> dict | None:
@@ -171,10 +187,8 @@ def _verify_all_vault_files(password: str) -> bool:
         if not os.path.exists(path):
             continue
         any_exists = True
-        try:
-            encrypted = _read_jkey(path)
-        except (OSError, json.JSONDecodeError, UnicodeDecodeError) as e:
-            print(f"Error: vault file corrupted: {path}: {e}", file=sys.stderr)
+        encrypted = _read_jkey(path)
+        if encrypted is None:
             return False
         if aes.decrypt(encrypted, password) is None:
             return False
@@ -224,6 +238,11 @@ def _ensure_unlocked():
 
 def is_unlocked() -> bool:
     return _session_password is not None
+
+
+def get_session_password() -> str | None:
+    """Return the current session password, or None if vault is locked."""
+    return _session_password
 
 
 def lock():
@@ -316,6 +335,23 @@ def save_qr_image(name: str, image_data: bytes):
     encoded = base64.b64encode(image_data).decode("ascii")
     encrypted = aes.encrypt({"raw": encoded}, pw)
     _write_jkey(_qr_path(name), encrypted)
+
+
+def delete_qr_image(name: str) -> bool:
+    path = _qr_path(name)
+    if not os.path.exists(path):
+        return False
+    try:
+        os.unlink(path)
+    except FileNotFoundError:
+        return True
+    except PermissionError as e:
+        print(f"Warning: cannot remove QR backup '{path}': {e}", file=sys.stderr)
+        return False
+    except OSError as e:
+        print(f"Warning: failed to remove QR backup '{path}': {e}", file=sys.stderr)
+        return False
+    return True
 
 
 def load_qr_image(name: str) -> bytes | None:
