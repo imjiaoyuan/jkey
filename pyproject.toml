@@ -1,6 +1,6 @@
 [project]
 name = "jkey"
-version = "0.3.0"
+version = "0.3.1"
 description = "Python library for password management and TOTP verification."
 readme = "README.md"
 requires-python = ">=3.10"

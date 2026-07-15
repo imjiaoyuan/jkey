@@ -89,10 +89,12 @@ def _save_session(password, totp, passwords, recovery):
         "recovery": recovery,
         "expires": time.time() + SESSION_TIMEOUT,
     }
+    tmp = SESSION_FILE + ".tmp"
     try:
-        with open(SESSION_FILE, "w") as f:
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w") as f:
             json.dump(payload, f)
-        os.chmod(SESSION_FILE, 0o600)
+        os.replace(tmp, SESSION_FILE)
     except OSError as e:
         print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
 
@@ -148,16 +150,31 @@ def _write_jkey(path: str, encrypted: dict):
         os.replace(tmp, path)
 
 
-def _write_secure_text(path: str, content: str, encoding: str = "utf-8", newline: str | None = None):
-    with open(path, "w", encoding=encoding, newline=newline) as f:
-        f.write(content)
-    os.chmod(path, 0o600)
+def _write_secure_text(path: str, content: str, encoding: str = "utf-8",
+                       newline: str | None = None, atomic: bool = False):
+    if atomic:
+        tmp = path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
+            f.write(content)
+        os.replace(tmp, path)
+    else:
+        with open(path, "w", encoding=encoding, newline=newline) as f:
+            f.write(content)
+        os.chmod(path, 0o600)
 
 
-def _write_secure_bytes(path: str, content: bytes):
-    with open(path, "wb") as f:
-        f.write(content)
-    os.chmod(path, 0o600)
+def _write_secure_bytes(path: str, content: bytes, atomic: bool = False):
+    if atomic:
+        tmp = path + ".tmp"
+        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(content)
+        os.replace(tmp, path)
+    else:
+        with open(path, "wb") as f:
+            f.write(content)
+        os.chmod(path, 0o600)
 
 
 def _decrypt_file(path: str, password: str) -> dict | None:
@@ -242,7 +259,7 @@ def _ensure_unlocked():
         return False
     for attempt in range(3):
         if attempt > 0:
-            time.sleep(2**attempt)
+            time.sleep(min(2**attempt, 8))
         pw = _prompt_password()
         if _unlock_all(pw):
             return True

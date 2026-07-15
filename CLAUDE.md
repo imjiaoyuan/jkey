@@ -6,6 +6,8 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 **jkey** — Python CLI tool and library for password management and TOTP verification. Manages TOTP secrets, website passwords, recovery codes; generates random passwords; and exports plaintext data. All data is encrypted with AES-256-CBC + HMAC-SHA256 and stored in `~/.config/jkey/`, each type in its own file. Pure Python — no OpenSSL or libsodium needed. Cross-platform: Linux, macOS, and Windows. File locking via `portalocker`.
 
+**Dependencies:** `portalocker` (required), `opencv-python-headless` (optional, only needed for `jkey 2fa add` QR scanning). Build backend: `setuptools`.
+
 ## Commands
 
 ### Development
@@ -17,7 +19,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - `uv run ruff format src/ tests/` — Format
 - `uv build` — Build distribution packages
 
-CI (`.github/workflows/ci.yml`) runs lint on Python 3.13 and tests on 3.10–3.14 across **ubuntu-latest, windows-latest, and macos-latest**. PyPI publishing (`.github/workflows/publish.yml`) triggers on `v*` tags and manual dispatch via trusted publishing.
+CI (`.github/workflows/ci.yml`) runs lint on Python 3.13 (ubuntu only), tests on 3.10–3.14 across **ubuntu-latest, windows-latest, and macos-latest**, and `uv build` on every matrix OS. PyPI publishing (`.github/workflows/publish.yml`) triggers on `v*` tags and manual dispatch via trusted publishing.
 
 ### 2FA
 - `uv run jkey 2fa ls [keyword]` — List accounts and current TOTP codes (case-insensitive filter)
@@ -215,7 +217,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 ```
 ~/.config/jkey/
 ├── .session           # Session cache — plain JSON, mode 600 (5 min activity-based timeout)
-├── .lock              # fcntl lock file (POSIX only)
+├── .lock              # portalocker cross-platform lock file
 ├── totp.jkey          # Encrypted TOTP secrets: {name: base32_secret}
 ├── passwords.jkey     # Encrypted passwords: {name: password}
 ├── recovery.jkey      # Encrypted recovery codes: {account: [code, ...]}
