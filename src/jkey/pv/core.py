@@ -1,11 +1,12 @@
 import base64
 import contextlib
-import fcntl
 import json
 import os
 import platform
 import sys
 import time
+
+import portalocker
 
 from jkey import aes
 
@@ -51,17 +52,10 @@ def _sanitize_filename(name: str) -> str:
 
 @contextlib.contextmanager
 def _lock_vault(shared: bool = False):
-    if platform.system() == "Windows":
-        yield
-        return
     _ensure_dir()
-    fd = os.open(VAULT_LOCK_PATH, os.O_CREAT | os.O_RDWR, 0o600)
-    try:
-        fcntl.flock(fd, fcntl.LOCK_SH if shared else fcntl.LOCK_EX)
+    mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
+    with portalocker.Lock(VAULT_LOCK_PATH, "a+", flags=mode) as _fh:
         yield
-    finally:
-        fcntl.flock(fd, fcntl.LOCK_UN)
-        os.close(fd)
 
 
 _session_password: str | None = None

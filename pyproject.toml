@@ -6,7 +6,7 @@ readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "jiaoyuan", email = "imjiaoyuan@gmail.com"}]
 license = "MIT"
-dependencies = []
+dependencies = ["portalocker>=2.0,<3.0"]
 
 [project.optional-dependencies]
 qr = ["opencv-python-headless>=4.9.0,<5.0.0"]
