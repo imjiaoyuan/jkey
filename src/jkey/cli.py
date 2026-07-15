@@ -8,7 +8,7 @@ def _call(mod_name, func_name, *args, **kwargs):
     return getattr(importlib.import_module(mod_name), func_name)(*args, **kwargs)
 
 
-def main():
+def _build_parser():
     parser = argparse.ArgumentParser(
         prog="jkey",
         description="Python library for password management and TOTP verification",
@@ -79,6 +79,11 @@ def main():
     x.add_argument("type", choices=["totp", "passwords", "recovery", "qr", "all"])
     x.add_argument("-o", "--output")
 
+    return parser
+
+
+def main():
+    parser = _build_parser()
     args = parser.parse_args()
     if args.command is None:
         parser.print_help()

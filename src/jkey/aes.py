@@ -49,12 +49,8 @@ for _a in range(256):
 
 
 def _sub_word(word):
-    return (
-        (SBOX[(word >> 24) & 0xFF] << 24)
-        | (SBOX[(word >> 16) & 0xFF] << 16)
-        | (SBOX[(word >> 8) & 0xFF] << 8)
-        | SBOX[word & 0xFF]
-    )
+    b = word.to_bytes(4, "big")
+    return int.from_bytes(bytes([SBOX[b[0]], SBOX[b[1]], SBOX[b[2]], SBOX[b[3]]]), "big")
 
 
 def _rot_word(word):
@@ -193,6 +189,12 @@ def _pkcs7_unpad(data: bytes) -> bytes:
 
 
 def aes_cbc_encrypt(plaintext: bytes, key: bytes, iv: bytes) -> bytes:
+    if len(plaintext) % 16 != 0:
+        raise ValueError(f"plaintext length must be a multiple of 16, got {len(plaintext)}")
+    if len(key) != 32:
+        raise ValueError(f"key must be 32 bytes, got {len(key)}")
+    if len(iv) != 16:
+        raise ValueError(f"IV must be 16 bytes, got {len(iv)}")
     encrypt_rk, _ = _key_expansion(key)
     ciphertext = bytearray()
     prev = iv
@@ -206,6 +208,12 @@ def aes_cbc_encrypt(plaintext: bytes, key: bytes, iv: bytes) -> bytes:
 
 
 def aes_cbc_decrypt(ciphertext: bytes, key: bytes, iv: bytes) -> bytes:
+    if len(ciphertext) % 16 != 0:
+        raise ValueError(f"ciphertext length must be a multiple of 16, got {len(ciphertext)}")
+    if len(key) != 32:
+        raise ValueError(f"key must be 32 bytes, got {len(key)}")
+    if len(iv) != 16:
+        raise ValueError(f"IV must be 16 bytes, got {len(iv)}")
     _, decrypt_rk = _key_expansion(key)
     plaintext = bytearray()
     prev = iv

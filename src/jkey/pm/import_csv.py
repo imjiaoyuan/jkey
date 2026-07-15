@@ -1,4 +1,5 @@
 import csv
+import io
 import os
 import sys
 from urllib.parse import urlparse
@@ -59,7 +60,7 @@ def _extract_name(row: list[str], mapping: dict[str, int], index: int) -> str:
             try:
                 parsed = urlparse(url)
                 base = parsed.hostname or ""
-            except (ValueError, TypeError):
+            except ValueError:
                 pass
             if not base:
                 base = url.removeprefix("https://").removeprefix("http://").rstrip("/")
@@ -121,6 +122,17 @@ def _process_row(row: list[str], mapping: dict[str, int], data: dict, mode: str,
             "username": username, "password": password}
 
 
+def _detect_encoding_and_read(file_path: str) -> tuple[str | None, str | None]:
+    """Try common encodings and return (encoding, content) or (None, None)."""
+    for encoding in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
+        try:
+            with open(file_path, encoding=encoding) as f:
+                return encoding, f.read()
+        except (UnicodeDecodeError, UnicodeError):
+            continue
+    return None, None
+
+
 def import_csv(
     file_path: str,
     dry_run: bool = False,
@@ -132,21 +144,13 @@ def import_csv(
         print(f"Error: File not found: {file_path}", file=sys.stderr)
         return
 
-    content = None
-    for encoding in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
-        try:
-            with open(file_path, encoding=encoding) as f:
-                content = f.read()
-            break
-        except (UnicodeDecodeError, UnicodeError):
-            continue
-
+    encoding, content = _detect_encoding_and_read(file_path)
     if content is None:
         print(f"Error: Cannot read '{file_path}' — unsupported encoding.", file=sys.stderr)
         return
 
     try:
-        reader = csv.reader(content.splitlines())
+        reader = csv.reader(io.StringIO(content))
         rows = list(reader)
     except csv.Error as e:
         print(f"Error: Cannot parse CSV: {e}", file=sys.stderr)

@@ -7,79 +7,9 @@ class TestParser:
     """Test that argparse parses each subcommand correctly."""
 
     def _parser(self):
-        """Build the parser (same as cli.main)."""
-        import argparse
+        from jkey.cli import _build_parser
 
-        parser = argparse.ArgumentParser(
-            prog="jkey",
-            description="Python library for password management and TOTP verification",
-        )
-        parser.add_argument("-v", "--version", action="version", version="jkey 0.0.0")
-        sub = parser.add_subparsers(dest="command")
-
-        p = sub.add_parser("2fa", help="Manage TOTP 2FA accounts")
-        p2 = p.add_subparsers(dest="action")
-        a = p2.add_parser("ls", help="List accounts and TOTP codes")
-        a.add_argument("keyword", nargs="?", default=None)
-        a = p2.add_parser("add", help="Import from QR code image")
-        a.add_argument("image_path")
-        a = p2.add_parser("rm", help="Remove account")
-        a.add_argument("account")
-
-        p = sub.add_parser("rc", help="Manage recovery codes")
-        p2 = p.add_subparsers(dest="action")
-        a = p2.add_parser("add", help="Import recovery codes from file")
-        a.add_argument("file_path")
-        a = p2.add_parser("ls", help="List recovery codes")
-        a.add_argument("keyword", nargs="?", default=None)
-        a = p2.add_parser("rm", help="Remove recovery codes")
-        a.add_argument("account")
-
-        p = sub.add_parser("pm", help="Manage passwords")
-        p2 = p.add_subparsers(dest="action")
-        a = p2.add_parser("ls", help="List stored passwords")
-        a.add_argument("keyword", nargs="?", default=None)
-        a = p2.add_parser("get", help="Generate random password")
-        a.add_argument("-L", "--length", type=int, default=16)
-        a.add_argument("--no-upper", action="store_true")
-        a.add_argument("--no-lower", action="store_true")
-        a.add_argument("--no-digits", action="store_true")
-        a.add_argument("--no-symbols", action="store_true")
-        a = p2.add_parser("add", help="Store password")
-        a.add_argument("name")
-        a = p2.add_parser("rm", help="Delete password")
-        a.add_argument("name")
-        e = p2.add_parser("edit", help="Update an existing password")
-        e.add_argument("name")
-        i = p2.add_parser("import", help="Import passwords from browser CSV export")
-        i.add_argument("file", help="Path to CSV file")
-        i.add_argument("-n", "--dry-run", action="store_true", help="Preview without saving")
-        i.add_argument("-v", "--verbose", action="store_true", help="Show skipped entries and reasons")
-        i.add_argument("--replace", action="store_true", help="Replace all existing passwords before import")
-        i.add_argument(
-            "-d", "--duplicates",
-            choices=["skip", "overwrite", "rename"],
-            default="skip",
-            help="How to handle duplicate entries (default: skip)",
-        )
-
-        p = sub.add_parser("pv", help="Manage encrypted vault")
-        p2 = p.add_subparsers(dest="action")
-        p2.add_parser("init", help="Initialize vault")
-        p2.add_parser("unlock", help="Unlock vault")
-        p2.add_parser("lock", help="Lock vault")
-        p2.add_parser("set-pw", help="Set master password")
-        e = p2.add_parser("encrypt", help="Encrypt a file")
-        e.add_argument("input")
-        e.add_argument("-o", "--output")
-        d = p2.add_parser("decrypt", help="Decrypt a .jkey file")
-        d.add_argument("input")
-        d.add_argument("-o", "--output")
-        x = p2.add_parser("export", help="Export plaintext data (re-enters master password)")
-        x.add_argument("type", choices=["totp", "passwords", "recovery", "qr", "all"])
-        x.add_argument("-o", "--output")
-
-        return parser
+        return _build_parser()
 
     def test_2fa_ls(self):
         parser = self._parser()

@@ -9,26 +9,31 @@ def add_password(name: str):
         return
 
     if name in data:
-        try:
-            choice = input(f"'{name}' already exists. (o)verwrite / (a)dd suffix / (c)ancel? (o/a/c): ").strip().lower()
-        except (EOFError, KeyboardInterrupt):
-            print()
-            return
-        if choice == "c":
-            return
-        elif choice == "a":
+        while True:
             try:
-                suffix = input("Suffix: ").strip()
+                choice = input(
+                    f"'{name}' already exists. (o)verwrite / (a)dd suffix / (c)ancel? (o/a/c): "
+                ).strip().lower()
             except (EOFError, KeyboardInterrupt):
                 print()
                 return
-            if not suffix:
-                print("Suffix cannot be empty.")
+            if choice == "c":
                 return
-            name = f"{name}-{suffix}"
-        elif choice != "o":
-            print("Invalid choice.")
-            return
+            elif choice == "a":
+                try:
+                    suffix = input("Suffix: ").strip()
+                except (EOFError, KeyboardInterrupt):
+                    print()
+                    return
+                if not suffix:
+                    print("Suffix cannot be empty.")
+                    continue
+                name = f"{name}-{suffix}"
+                break
+            elif choice == "o":
+                break
+            else:
+                print("Invalid choice. Please enter 'o', 'a', or 'c'.")
 
     pw = getpass.getpass(f"Password for '{name}': ")
     if not pw:
