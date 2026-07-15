@@ -23,7 +23,7 @@ def _export_totp(output: str | None) -> None:
         return
     out = _build_totp_content(data)
     if output:
-        _write_secure_text(output, out)
+        _write_secure_text(output, out, atomic=True)
         print(f"Exported TOTP secrets to {output}")
     else:
         print(out, end="")
@@ -41,7 +41,7 @@ def _export_passwords(output: str | None) -> None:
         return
     out = _build_passwords_content(data)
     if output:
-        _write_secure_text(output, out, newline="")
+        _write_secure_text(output, out, newline="", atomic=True)
         print(f"Exported passwords to {output}")
     else:
         print(out, end="")
@@ -62,7 +62,7 @@ def _export_recovery(output: str | None) -> None:
         return
     out = _build_recovery_content(data)
     if output:
-        _write_secure_text(output, out + "\n")
+        _write_secure_text(output, out + "\n", atomic=True)
         print(f"Exported recovery codes to {output}")
     else:
         print(out)
@@ -88,7 +88,7 @@ def _export_qr(output_dir: str) -> None:
         img = load_qr_image(name)
         if img:
             path = os.path.join(output_dir, f"{name}.jpg")
-            _write_secure_bytes(path, img)
+            _write_secure_bytes(path, img, atomic=True)
     print(f"Exported {len(names)} QR images to {output_dir}")
 
 
@@ -126,19 +126,19 @@ def cmd_export(args):
         totp_data = load_totp()
         if totp_data:
             p = os.path.join(output, "totp.json")
-            _write_secure_text(p, _build_totp_content(totp_data))
+            _write_secure_text(p, _build_totp_content(totp_data), atomic=True)
             print(f"  {p}")
 
         pw_data = load_passwords()
         if pw_data:
             p = os.path.join(output, "passwords.csv")
-            _write_secure_text(p, _build_passwords_content(pw_data), newline="")
+            _write_secure_text(p, _build_passwords_content(pw_data), newline="", atomic=True)
             print(f"  {p}")
 
         rc_data = load_recovery()
         if rc_data:
             p = os.path.join(output, "recovery.txt")
-            _write_secure_text(p, _build_recovery_content(rc_data) + "\n")
+            _write_secure_text(p, _build_recovery_content(rc_data) + "\n", atomic=True)
             print(f"  {p}")
 
         qr_dir = os.path.join(output, "qr")
@@ -149,7 +149,7 @@ def cmd_export(args):
                 img = load_qr_image(name)
                 if img:
                     p = os.path.join(qr_dir, f"{name}.jpg")
-                    _write_secure_bytes(p, img)
+                    _write_secure_bytes(p, img, atomic=True)
             print(f"  {qr_dir}/ ({len(names)} images)")
 
         print(f"Exported to {output}")

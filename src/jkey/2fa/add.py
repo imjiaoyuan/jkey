@@ -19,7 +19,7 @@ def _resize_if_large(img, max_size=1000):
     return img
 
 
-def scan_and_add(image_path: str):
+def scan_and_add(image_path: str) -> None:
     if cv2 is None:
         print("Error: opencv-python-headless is required for QR scanning.")
         print("Install with: pip install opencv-python-headless")
@@ -54,9 +54,7 @@ def scan_and_add(image_path: str):
     path = unquote(parsed.path).lstrip("/")
     issuer = params.get("issuer", [None])[0]
 
-    if issuer and ":" in path:
-        name = path
-    elif issuer:
+    if issuer and ":" not in path:
         name = f"{issuer}:{path}"
     else:
         name = path
