@@ -7,7 +7,7 @@ from urllib.parse import urlparse
 from jkey.pm.core import load_passwords, save_passwords
 
 _COLUMN_ALIASES = {
-    "name": ["name", "title", "site", "account"],
+    "name": ["name", "title", "account"],
     "url": [
         "url",
         "website",
@@ -112,14 +112,24 @@ def _process_row(row: list[str], mapping: dict[str, int], data: dict, mode: str,
 
     final_name, should_import = _resolve_duplicate(name, data, mode)
     if not should_import:
-        return {"action": "skip", "reason": "duplicate", "name": name, "final_name": final_name,
-                "username": username, "password": password}
+        return {
+            "action": "skip",
+            "reason": "duplicate",
+            "name": name,
+            "final_name": final_name,
+            "username": username,
+            "password": password,
+        }
 
     if final_name in data:
-        return {"action": "overwrite", "name": name, "final_name": final_name,
-                "username": username, "password": password}
-    return {"action": "new", "name": name, "final_name": final_name,
-            "username": username, "password": password}
+        return {
+            "action": "overwrite",
+            "name": name,
+            "final_name": final_name,
+            "username": username,
+            "password": password,
+        }
+    return {"action": "new", "name": name, "final_name": final_name, "username": username, "password": password}
 
 
 def _detect_encoding_and_read(file_path: str) -> tuple[str | None, str | None]:
@@ -275,9 +285,7 @@ def _print_entries(entries: list[tuple[str, str, str]]) -> None:
         print(f"  {name}: {masked}")
 
 
-def _print_dry_run(
-    data_rows: list[list[str]], mapping: dict[str, int], existing: dict, mode: str
-) -> None:
+def _print_dry_run(data_rows: list[list[str]], mapping: dict[str, int], existing: dict, mode: str) -> None:
     new_count = 0
     overwrite_count = 0
     skip_count = 0

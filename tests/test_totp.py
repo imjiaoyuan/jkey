@@ -81,7 +81,7 @@ class TestTOTP:
     def test_different_secrets(self):
         c1 = totp("JBSWY3DPEHPK3PXP")
         c2 = totp("GEZDGNBVGY3TQOJQ")
-        assert c1 != c2 or True
+        assert c1 != c2, f"Different secrets should produce different codes, got {c1} == {c2}"
 
     def test_code_changes_over_time(self):
         secret = _b32_decode("JBSWY3DPEHPK3PXP")

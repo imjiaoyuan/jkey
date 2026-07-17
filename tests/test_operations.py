@@ -420,13 +420,14 @@ class TestPmEdit:
 
 
 class TestPmImportCsv:
-
     def test_chrome_csv(self, vault, tmp_path, capsys):
         from jkey.pm.import_csv import import_csv
         from jkey.pv.core import load_passwords
 
         f = tmp_path / "chrome.csv"
-        f.write_text("name,url,username,password\nGoogle,https://google.com,user1,pass1\nGitHub,https://github.com,user2,pass2\n")
+        f.write_text(
+            "name,url,username,password\nGoogle,https://google.com,user1,pass1\nGitHub,https://github.com,user2,pass2\n"
+        )
         import_csv(str(f))
         captured = capsys.readouterr()
         assert "Imported 2" in captured.out
@@ -439,7 +440,9 @@ class TestPmImportCsv:
         from jkey.pv.core import load_passwords
 
         f = tmp_path / "multi.csv"
-        f.write_text("name,url,username,password\nGoogle,https://google.com,alice@gmail.com,pass1\nGoogle,https://google.com,bob@gmail.com,pass2\n")
+        f.write_text(
+            "name,url,username,password\nGoogle,https://google.com,alice@gmail.com,pass1\nGoogle,https://google.com,bob@gmail.com,pass2\n"
+        )
         import_csv(str(f))
         capsys.readouterr()
         data = load_passwords()
@@ -557,8 +560,10 @@ class TestPmImportCsv:
         from jkey.pv.core import load_passwords
 
         f = tmp_path / "dashlane.csv"
-        f.write_text("username,username2,username3,title,password,note,url,category,otpSecret\n"
-                     "dluser,,,DashlaneSite,dlpass,,https://dl.example.com,,\n")
+        f.write_text(
+            "username,username2,username3,title,password,note,url,category,otpSecret\n"
+            "dluser,,,DashlaneSite,dlpass,,https://dl.example.com,,\n"
+        )
         import_csv(str(f))
         capsys.readouterr()
         assert load_passwords() == {"DashlaneSite (dluser)": "dlpass"}
@@ -568,8 +573,7 @@ class TestPmImportCsv:
         from jkey.pv.core import load_passwords
 
         f = tmp_path / "lastpass.csv"
-        f.write_text("url,username,password,totp,extra,name,grouping,fav\n"
-                     "https://lp.example.com,lpuser,lppass,,,,,\n")
+        f.write_text("url,username,password,totp,extra,name,grouping,fav\nhttps://lp.example.com,lpuser,lppass,,,,,\n")
         import_csv(str(f))
         capsys.readouterr()
         assert "lp.example.com (lpuser)" in load_passwords()
