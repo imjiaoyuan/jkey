@@ -350,8 +350,10 @@ class TestSessionV2:
         assert raw["sv"] == 3
         assert core._load_session() is True
 
-    def test_activity_based_timeout_reset(self, vault_dir):
+    def test_activity_based_timeout_reset(self, vault_dir, monkeypatch):
         import jkey.pv.core as core
+
+        monkeypatch.setattr(core, "_SESSION_SAVE_INTERVAL", 0)
 
         core._encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
         core._encrypt_file(core.PASSWORDS_FILE, {}, "pw")

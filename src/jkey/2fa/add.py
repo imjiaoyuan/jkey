@@ -70,7 +70,6 @@ def scan_and_add(image_path: str) -> None:
     print(f"Added 2FA account: {name}")
 
     try:
-        resized = _resize_if_large(img, max_size=1000)
-        save_qr_image(name, cv2.imencode(".jpg", resized)[1].tobytes())
+        save_qr_image(name, cv2.imencode(".jpg", small)[1].tobytes())
     except (cv2.error, OSError):
         print(f"Warning: failed to save encrypted QR backup for '{name}'", file=sys.stderr)

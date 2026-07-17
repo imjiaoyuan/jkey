@@ -56,7 +56,8 @@ def _build_parser():
     i.add_argument("-v", "--verbose", action="store_true", help="Show skipped entries and reasons")
     i.add_argument("--replace", action="store_true", help="Replace all existing passwords before import")
     i.add_argument(
-        "-d", "--duplicates",
+        "-d",
+        "--duplicates",
         choices=["skip", "overwrite", "rename"],
         default="skip",
         help="How to handle duplicate entries (default: skip)",
@@ -106,8 +107,8 @@ def _2fa(args):
         "rm": ("jkey.2fa.rm", "remove_account", ("account",)),
     }
     if args.action not in routes:
-        print("Usage: jkey 2fa ls|add|rm")
-        return
+        print("Usage: jkey 2fa ls|add|rm", file=sys.stderr)
+        sys.exit(1)
     mod_name, func_name, attr_names = routes[args.action]
     call_args = tuple(getattr(args, name) for name in attr_names)
     result = _call(mod_name, func_name, *call_args)
@@ -127,8 +128,8 @@ def _rc(args):
         "rm": ("jkey.rc.rm", "rc_remove", ("account",)),
     }
     if args.action not in routes:
-        print("Usage: jkey rc add|ls|rm")
-        return
+        print("Usage: jkey rc add|ls|rm", file=sys.stderr)
+        sys.exit(1)
     mod_name, func_name, attr_names = routes[args.action]
     call_args = tuple(getattr(args, name) for name in attr_names)
     result = _call(mod_name, func_name, *call_args)
@@ -158,10 +159,15 @@ def _pm(args):
                     print(f"{name}: {pw_val}")
     elif a == "get":
         try:
-            pwd = _call("jkey.pm.get", "generate_password",
-                        length=args.length, uppercase=not args.no_upper,
-                        lowercase=not args.no_lower, digits=not args.no_digits,
-                        symbols=not args.no_symbols)
+            pwd = _call(
+                "jkey.pm.get",
+                "generate_password",
+                length=args.length,
+                uppercase=not args.no_upper,
+                lowercase=not args.no_lower,
+                digits=not args.no_digits,
+                symbols=not args.no_symbols,
+            )
             print(pwd)
         except ValueError as e:
             print(f"Error: {e}")
@@ -173,11 +179,18 @@ def _pm(args):
     elif a == "edit":
         _call("jkey.pm.edit", "edit_password", args.name)
     elif a == "import":
-        _call("jkey.pm.import_csv", "import_csv", args.file,
-              dry_run=args.dry_run, duplicates=args.duplicates,
-              verbose=args.verbose, replace=args.replace)
+        _call(
+            "jkey.pm.import_csv",
+            "import_csv",
+            args.file,
+            dry_run=args.dry_run,
+            duplicates=args.duplicates,
+            verbose=args.verbose,
+            replace=args.replace,
+        )
     else:
-        print("Usage: jkey pm ls|get|add|rm|edit|import")
+        print("Usage: jkey pm ls|get|add|rm|edit|import", file=sys.stderr)
+        sys.exit(1)
 
 
 def _pv(args):
@@ -198,4 +211,5 @@ def _pv(args):
     elif a == "export":
         _call("jkey.pv.export", "cmd_export", args)
     else:
-        print("Usage: jkey pv init|unlock|lock|status|set-pw|encrypt|decrypt|export")
+        print("Usage: jkey pv init|unlock|lock|status|set-pw|encrypt|decrypt|export", file=sys.stderr)
+        sys.exit(1)

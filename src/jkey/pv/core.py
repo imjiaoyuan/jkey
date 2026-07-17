@@ -37,8 +37,7 @@ def _check_password_strength(password: str) -> tuple[bool, str]:
     strength_count = sum([has_upper, has_lower, has_digit, has_special])
     if len(password) < 12 and strength_count < 3:
         return False, (
-            "Password should be at least 12 characters or include more character types "
-            "(upper, lower, digits, special)."
+            "Password should be at least 12 characters or include more character types (upper, lower, digits, special)."
         )
     return True, ""
 
@@ -62,6 +61,8 @@ _session_password: str | None = None
 _totp_cache: dict | None = None
 _passwords_cache: dict | None = None
 _recovery_cache: dict | None = None
+_SESSION_SAVE_INTERVAL = 1
+_session_last_save: float = 0.0
 
 
 def _ensure_dir():
@@ -73,10 +74,15 @@ def _password_from_env() -> str | None:
     return os.environ.get("JKEY_PASS")
 
 
-def _prompt_password(prompt: str = "Master password: ") -> str:
+def _prompt_password(prompt: str = "Master password: ") -> str | None:
     import getpass
 
-    return getpass.getpass(prompt)
+    try:
+        pw = getpass.getpass(prompt)
+        return pw if pw else None
+    except (EOFError, KeyboardInterrupt):
+        print(file=sys.stderr)
+        return None
 
 
 def _save_session(password, totp, passwords, recovery):
@@ -111,11 +117,14 @@ def _load_session() -> bool:
     if time.time() >= data["expires"]:
         _clear_session()
         return False
+    global _session_last_save
     _session_password = data["password"]
     _totp_cache = data["totp"]
     _passwords_cache = data["passwords"]
     _recovery_cache = data["recovery"]
-    _save_session(_session_password, _totp_cache, _passwords_cache, _recovery_cache)
+    if time.time() - _session_last_save > _SESSION_SAVE_INTERVAL:
+        _save_session(_session_password, _totp_cache, _passwords_cache, _recovery_cache)
+        _session_last_save = time.time()
     return True
 
 
@@ -150,8 +159,9 @@ def _write_jkey(path: str, encrypted: dict):
         os.replace(tmp, path)
 
 
-def _write_secure_text(path: str, content: str, encoding: str = "utf-8",
-                       newline: str | None = None, atomic: bool = False):
+def _write_secure_text(
+    path: str, content: str, encoding: str = "utf-8", newline: str | None = None, atomic: bool = False
+):
     if atomic:
         tmp = path + ".tmp"
         fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
@@ -261,6 +271,9 @@ def _ensure_unlocked():
         if attempt > 0:
             time.sleep(min(2**attempt, 8))
         pw = _prompt_password()
+        if pw is None:
+            print("Cancelled.")
+            break
         if _unlock_all(pw):
             return True
         print("Incorrect password. Try again.")

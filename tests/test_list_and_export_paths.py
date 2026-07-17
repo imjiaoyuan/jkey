@@ -91,9 +91,8 @@ class TestExportPaths:
 
         monkeypatch.setattr(mod, "_ensure_unlocked", lambda: True)
         monkeypatch.setattr(mod, "_password_from_env", lambda: "from-env")
-        monkeypatch.setattr(mod, "verify_password", lambda pw: pw == "from-env")
+        monkeypatch.setattr(mod, "get_session_password", lambda: "from-env")
         monkeypatch.setattr(mod, "load_totp", lambda: {"github": "JBSWY3DPEHPK3PXP"})
-        monkeypatch.setattr(mod.getpass, "getpass", lambda _p: (_ for _ in ()).throw(AssertionError("prompted")))
 
         args = type("Args", (), {"type": "totp", "output": None})
         mod.cmd_export(args)
@@ -105,7 +104,7 @@ class TestExportPaths:
 
         monkeypatch.setattr(mod, "_ensure_unlocked", lambda: True)
         monkeypatch.setattr(mod, "_password_from_env", lambda: "pw")
-        monkeypatch.setattr(mod, "verify_password", lambda _pw: True)
+        monkeypatch.setattr(mod, "get_session_password", lambda: "pw")
         monkeypatch.setattr(mod, "list_qr_images", lambda: ["acc1"])
         monkeypatch.setattr(mod, "load_qr_image", lambda _name: b"image-bytes")
 
@@ -120,7 +119,7 @@ class TestExportPaths:
 
         monkeypatch.setattr(mod, "_ensure_unlocked", lambda: True)
         monkeypatch.setattr(mod, "_password_from_env", lambda: "pw")
-        monkeypatch.setattr(mod, "verify_password", lambda _pw: True)
+        monkeypatch.setattr(mod, "get_session_password", lambda: "pw")
         monkeypatch.setattr(mod, "load_totp", lambda: {"github": "JBSWY3DPEHPK3PXP"})
         monkeypatch.setattr(mod, "load_passwords", lambda: {"site": "pass"})
         monkeypatch.setattr(mod, "load_recovery", lambda: {"github": ["rc1"]})

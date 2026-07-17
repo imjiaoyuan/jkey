@@ -17,7 +17,7 @@ def cmd_init():
         print("Vault already exists. Use 'jkey pv set-pw' to change password.")
         return
     pw1 = _password_from_env()
-    if pw1 is None:
+    if not pw1:
         pw1 = _prompt_password("Set master password: ")
         if not pw1:
             print("Password cannot be empty.")

@@ -11,9 +11,9 @@ def add_password(name: str):
     if name in data:
         while True:
             try:
-                choice = input(
-                    f"'{name}' already exists. (o)verwrite / (a)dd suffix / (c)ancel? (o/a/c): "
-                ).strip().lower()
+                choice = (
+                    input(f"'{name}' already exists. (o)verwrite / (a)dd suffix / (c)ancel? (o/a/c): ").strip().lower()
+                )
             except (EOFError, KeyboardInterrupt):
                 print()
                 return
@@ -35,11 +35,19 @@ def add_password(name: str):
             else:
                 print("Invalid choice. Please enter 'o', 'a', or 'c'.")
 
-    pw = getpass.getpass(f"Password for '{name}': ")
+    try:
+        pw = getpass.getpass(f"Password for '{name}': ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
     if not pw:
         print("Password cannot be empty.")
         return
-    pw2 = getpass.getpass(f"Confirm password for '{name}': ")
+    try:
+        pw2 = getpass.getpass(f"Confirm password for '{name}': ")
+    except (EOFError, KeyboardInterrupt):
+        print()
+        return
     if pw != pw2:
         print("Passwords do not match.")
         return
