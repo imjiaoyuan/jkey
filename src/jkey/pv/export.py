@@ -8,12 +8,12 @@ from jkey.pv.core import (
     _password_from_env,
     _write_secure_bytes,
     _write_secure_text,
+    get_session_password,
     list_qr_images,
     load_passwords,
     load_qr_image,
     load_recovery,
     load_totp,
-    verify_password,
 )
 
 
@@ -23,16 +23,16 @@ def _export_totp(output: str | None) -> None:
         return
     out = _build_totp_content(data)
     if output:
-        _write_secure_text(output, out, atomic=True)
+        _write_secure_text(output, out + "\n", atomic=True)
         print(f"Exported TOTP secrets to {output}")
     else:
-        print(out, end="")
+        print(out)
 
 
 def _build_totp_content(data: dict) -> str:
     import json
 
-    return json.dumps(data, indent=4, ensure_ascii=False) + "\n"
+    return json.dumps(data, indent=4, ensure_ascii=False)
 
 
 def _export_passwords(output: str | None) -> None:
@@ -96,10 +96,25 @@ def cmd_export(args):
     if not _ensure_unlocked():
         return
 
+    session_pw = get_session_password()
     env_pw = _password_from_env()
-    if not env_pw or not verify_password(env_pw):
-        pw = getpass.getpass("Confirm master password to export: ")
-        if not verify_password(pw):
+    if env_pw:
+        if env_pw != session_pw:
+            try:
+                pw = getpass.getpass("Confirm master password to export: ")
+            except (EOFError, KeyboardInterrupt):
+                print("\nExport cancelled.")
+                return
+            if pw != session_pw:
+                print("Incorrect password. Export cancelled.")
+                return
+    else:
+        try:
+            pw = getpass.getpass("Confirm master password to export: ")
+        except (EOFError, KeyboardInterrupt):
+            print("\nExport cancelled.")
+            return
+        if pw != session_pw:
             print("Incorrect password. Export cancelled.")
             return
 

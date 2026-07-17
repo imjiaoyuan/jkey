@@ -1,4 +1,5 @@
 import os
+import sys
 
 import jkey.pv.core as core
 
@@ -30,3 +31,5 @@ def cmd_set_pw():
         return
     if core.change_master_password(pw1):
         print("Master password changed.")
+    else:
+        print("Error: Failed to change master password. Vault may be in an inconsistent state.", file=sys.stderr)

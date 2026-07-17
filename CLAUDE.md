@@ -90,7 +90,7 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 src/
 └── jkey/
     ├── __init__.py
-    ├── __main__.py              # python -m jkey entry point (calls cli.main())
+    ├── __main__.py              # python -m jkey entry point (calls cli.main(); equivalent to `jkey` CLI)
     ├── cli.py                   # argparse CLI entry (lazy imports)
     ├── aes.py                   # AES-256-CBC + HMAC pure Python implementation
     ├── 2fa/
@@ -136,7 +136,8 @@ tests/
     └── publish.yml              # PyPI publish (tag + manual trigger)
 .claude/
 ├── settings.local.json          # Local permission allowlist for dev commands
-└── skills/                      # Custom Claude Code skills (python-expert)
+└── skills/
+    └── python-expert/           # Custom skill: senior Python developer expertise for code review & best practices
 ```
 
 ## Architecture
@@ -149,7 +150,7 @@ CLI (cli.py) → Domain modules (2fa/ pm/ rc/) → Vault core (pv/core.py) → C
 
 - **`aes.py`** — Pure-Python AES-256-CBC + HMAC-SHA256. Has zero external dependencies. Exposes only `encrypt(dict, password) → dict` and `decrypt(dict, password) → dict | None`. All internal functions (`_key_expansion`, `_encrypt_block`, `_pkcs7_pad`, etc.) are private. PBKDF2-HMAC-SHA256 with 600,000 iterations.
 - **`pv/core.py`** — Vault session manager and the sole data-access layer. Module-level globals (`_session_password`, `_totp_cache`, `_passwords_cache`, `_recovery_cache`) track unlocked state. All domain modules read/write through its `load_*`/`save_*` functions. Also manages QR image storage. Uses `portalocker` for cross-platform file locking (shared locks for reads, exclusive for writes) — replaces the old POSIX-only `fcntl.flock`.
-- **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly. `pm/import_csv.py` handles browser CSV password imports with encoding auto-detection (utf-8-sig, utf-8, utf-16, latin-1), flexible column-alias matching (20+ recognized header names across name/url/username/password), and three duplicate-resolution modes (skip/overwrite/rename). The `--replace` flag clears **all** existing passwords before importing — a destructive operation that replaces the entire password store with the CSV contents.
+- **Domain modules** (`2fa/`, `pm/`, `rc/`) — Each implements CLI command handlers. They import from `pv.core` or their own `core.py` for data access; never touch `aes.py` directly. `pm/core.py` is a thin re-export layer: it re-exports `load_passwords` and `save_passwords` from `pv.core` so that `pm/` modules can import from their sibling `core.py` instead of reaching across to `pv.core` directly. `pm/import_csv.py` handles browser CSV password imports with encoding auto-detection (utf-8-sig, utf-8, utf-16, latin-1), flexible column-alias matching (20+ recognized header names across name/url/username/password), and three duplicate-resolution modes (skip/overwrite/rename). Name extraction uses the `name` column if present, falling back to URL hostname → username → `entry-N`. If a username column exists and differs from the extracted name, the entry is stored as `name (username)`. The `--replace` flag clears **all** existing passwords before importing — a destructive operation that replaces the entire password store with the CSV contents.
 - **`cli.py`** — argparse entry point. Uses `importlib.import_module()` for **lazy imports**: each subcommand's module is only imported when that subcommand is invoked, keeping startup fast. Because the `2fa` package name starts with a digit, imports use `importlib.import_module("jkey.2fa...")` — normal `from jkey.2fa import ...` is invalid syntax. All three `ls` subcommands (`2fa ls`, `pm ls`, `rc ls`) return structured data from their core functions; `cli.py` handles printing (sorted alphabetically, case-insensitive keyword filtering). Other commands print internally within their domain modules.
 
 ### Encryption Format
@@ -194,7 +195,7 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 - **Cross-feature account removal:** removing a 2FA account (`2fa rm`) also prompts to delete matching recovery codes. Keep this coupling in mind when modifying either domain.
 - **Dynamic imports for `2fa`:** because `2fa` starts with a digit, `from jkey.2fa import ...` is invalid Python syntax. Always use `importlib.import_module("jkey.2fa...")` — the CLI already does this, and tests follow the same pattern.
 - **List commands share an output pattern:** sort keys alphabetically and apply case-insensitive keyword filtering. `cli.py` handles printing for all three `ls` subcommands.
-- **Export builder pattern:** `pv/export.py` separates `_build_*_content()` (pure data → string) from `_export_*()` (content + file I/O). This lets tests verify output correctness without touching the filesystem. New export formats should follow this split.
+- **Export builder pattern:** `pv/export.py` separates `_build_*_content()` (pure data → string) from `_export_*()` (content + file I/O). This lets tests verify output correctness without touching the filesystem. Output formats: TOTP → JSON, passwords → CSV (`name,password`), recovery → plain text (`Account: <name>` blocks), QR → `.jpg` files. New export formats should follow this split.
 - **`__init__.py` is intentionally empty:** the package exposes no public library API — it is purely a CLI tool. All functionality is accessed through `jkey` subcommands.
 - **Test isolation via monkeypatching:** use `conftest.py` fixtures (`vault_dir`, `vault`) rather than touching real `~/.config/jkey`. Tests that need to bypass password prompts set `JKEY_PASS` in the environment.
 
