@@ -101,14 +101,16 @@ def main():
 
 def _2fa(args):
     routes = {
-        "ls": ("jkey.2fa.ls", "list_accounts", (args.keyword,)),
-        "add": ("jkey.2fa.add", "scan_and_add", (args.image_path,)),
-        "rm": ("jkey.2fa.rm", "remove_account", (args.account,)),
+        "ls": ("jkey.2fa.ls", "list_accounts", ("keyword",)),
+        "add": ("jkey.2fa.add", "scan_and_add", ("image_path",)),
+        "rm": ("jkey.2fa.rm", "remove_account", ("account",)),
     }
     if args.action not in routes:
         print("Usage: jkey 2fa ls|add|rm")
         return
-    result = _call(routes[args.action][0], routes[args.action][1], *routes[args.action][2])
+    mod_name, func_name, attr_names = routes[args.action]
+    call_args = tuple(getattr(args, name) for name in attr_names)
+    result = _call(mod_name, func_name, *call_args)
     if args.action == "ls" and result is not None:
         if not result:
             msg = f"No accounts matching '{args.keyword}'." if args.keyword else "No 2FA accounts found."
@@ -120,14 +122,16 @@ def _2fa(args):
 
 def _rc(args):
     routes = {
-        "add": ("jkey.rc.add", "rc_add_file", (args.file_path,)),
-        "ls": ("jkey.rc.ls", "rc_list", (args.keyword,)),
-        "rm": ("jkey.rc.rm", "rc_remove", (args.account,)),
+        "add": ("jkey.rc.add", "rc_add_file", ("file_path",)),
+        "ls": ("jkey.rc.ls", "rc_list", ("keyword",)),
+        "rm": ("jkey.rc.rm", "rc_remove", ("account",)),
     }
     if args.action not in routes:
         print("Usage: jkey rc add|ls|rm")
         return
-    result = _call(routes[args.action][0], routes[args.action][1], *routes[args.action][2])
+    mod_name, func_name, attr_names = routes[args.action]
+    call_args = tuple(getattr(args, name) for name in attr_names)
+    result = _call(mod_name, func_name, *call_args)
     if args.action == "ls" and result is not None:
         if not result:
             msg = f"No recovery codes matching '{args.keyword}'." if args.keyword else "No recovery codes found."
