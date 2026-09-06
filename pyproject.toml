@@ -10,6 +10,7 @@ dependencies = ["portalocker>=2.0,<3.0"]
 
 [project.optional-dependencies]
 qr = ["opencv-python-headless>=4.9.0,<5.0.0"]
+dev = ["pytest>=8", "pytest-cov>=6", "ruff>=0.11"]
 
 [project.urls]
 Homepage = "https://github.com/imjiaoyuan/jkey"
@@ -24,9 +25,6 @@ build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
 where = ["src"]
-
-[dependency-groups]
-dev = ["pytest>=8", "pytest-cov>=6", "ruff>=0.11"]
 
 [tool.ruff]
 line-length = 120
