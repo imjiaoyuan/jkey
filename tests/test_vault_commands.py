@@ -1,5 +1,10 @@
 import os
 
+import pytest
+
+from jkey import aes
+from jkey.errors import JkeyError
+
 
 class TestCmdInit:
     def test_init_creates_vault(self, vault_dir, monkeypatch):
@@ -24,9 +29,8 @@ class TestCmdInit:
 
         cmd_init()
         capsys.readouterr()
-        cmd_init()
-        captured = capsys.readouterr()
-        assert "already exists" in captured.out
+        with pytest.raises(JkeyError, match="already exists"):
+            cmd_init()
 
     def test_init_with_env_password(self, vault_dir, monkeypatch, capsys):
         from jkey.pv.init import cmd_init
@@ -46,26 +50,23 @@ class TestCmdInit:
         answers = iter(["StrongPassword123!", "DifferentPassword456!"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
         monkeypatch.setattr("builtins.input", lambda p="": "y")
-        cmd_init()
-        captured = capsys.readouterr()
-        assert "do not match" in captured.out
+        with pytest.raises(JkeyError, match="do not match"):
+            cmd_init()
 
     def test_init_with_empty_password(self, vault_dir, monkeypatch, capsys):
         from jkey.pv.init import cmd_init
 
         monkeypatch.setattr("getpass.getpass", lambda p="": "")
-        cmd_init()
-        captured = capsys.readouterr()
-        assert "cannot be empty" in captured.out
+        with pytest.raises(JkeyError, match="cannot be empty"):
+            cmd_init()
 
 
 class TestCmdUnlock:
     def test_unlock_no_vault(self, vault_dir, capsys):
         from jkey.pv.unlock import cmd_unlock
 
-        cmd_unlock()
-        captured = capsys.readouterr()
-        assert "not initialized" in captured.out
+        with pytest.raises(JkeyError, match="not initialized"):
+            cmd_unlock()
 
     def test_unlock_already_unlocked(self, vault, capsys):
         from jkey.pv.unlock import cmd_unlock
@@ -75,9 +76,9 @@ class TestCmdUnlock:
         assert "already unlocked" in captured.out
 
     def test_unlock_success(self, vault_dir, capsys, monkeypatch):
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, is_unlocked
+        from jkey.pv.core import TOTP_FILE, encrypt_file, is_unlocked
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
         monkeypatch.setattr("getpass.getpass", lambda p="": "pw")
 
         from jkey.pv.unlock import cmd_unlock
@@ -110,13 +111,11 @@ class TestCmdSetPw:
     def test_set_pw_no_vault(self, vault_dir, capsys):
         from jkey.pv.set_pw import cmd_set_pw
 
-        cmd_set_pw()
-        captured = capsys.readouterr()
-        assert "not initialized" in captured.out
+        with pytest.raises(JkeyError, match="not initialized"):
+            cmd_set_pw()
 
     def test_set_pw_success(self, vault, capsys, monkeypatch):
         import jkey.pv.core as core
-        from jkey.pv.core import TOTP_FILE, _decrypt_file
         from jkey.pv.set_pw import cmd_set_pw
 
         answers = iter(["New-Password-123!", "New-Password-123!"])
@@ -125,25 +124,23 @@ class TestCmdSetPw:
         captured = capsys.readouterr()
         assert "changed" in captured.out
         assert core._session_password == "New-Password-123!"
-        assert _decrypt_file(TOTP_FILE, "test-password") is None
-        assert _decrypt_file(TOTP_FILE, "New-Password-123!") is not None
+        assert aes.decrypt(core.read_jkey(core.TOTP_FILE), "test-password") is None
+        assert aes.decrypt(core.read_jkey(core.TOTP_FILE), "New-Password-123!") is not None
 
     def test_set_pw_mismatch(self, vault, capsys, monkeypatch):
         from jkey.pv.set_pw import cmd_set_pw
 
         answers = iter(["New-Pass-123!", "New-Pass-456!"])
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
-        cmd_set_pw()
-        captured = capsys.readouterr()
-        assert "do not match" in captured.out
+        with pytest.raises(JkeyError, match="do not match"):
+            cmd_set_pw()
 
     def test_set_pw_empty(self, vault, capsys, monkeypatch):
         from jkey.pv.set_pw import cmd_set_pw
 
         monkeypatch.setattr("getpass.getpass", lambda p="": "")
-        cmd_set_pw()
-        captured = capsys.readouterr()
-        assert "cannot be empty" in captured.out
+        with pytest.raises(JkeyError, match="cannot be empty"):
+            cmd_set_pw()
 
 
 class TestCmdEncrypt:
@@ -172,9 +169,8 @@ class TestCmdEncrypt:
     def test_encrypt_file_not_found(self, vault, capsys):
         from jkey.pv.encrypt import encrypt_file
 
-        encrypt_file("/nonexistent/file")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            encrypt_file("/nonexistent/file")
 
 
 class TestCmdDecrypt:
@@ -197,9 +193,8 @@ class TestCmdDecrypt:
     def test_decrypt_file_not_found(self, vault, capsys):
         from jkey.pv.decrypt import decrypt_file
 
-        decrypt_file("/nonexistent.jkey")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            decrypt_file("/nonexistent.jkey")
 
     def test_decrypt_wrong_password(self, vault, tmp_path, capsys):
         """Test decrypt with wrong session password."""
@@ -218,11 +213,10 @@ class TestCmdDecrypt:
         original = core._session_password
         core._session_password = "wrong"
         try:
-            decrypt_file(str(encrypted_path))
+            with pytest.raises(JkeyError, match="Decryption failed"):
+                decrypt_file(str(encrypted_path))
         finally:
             core._session_password = original
-        captured = capsys.readouterr()
-        assert "Decryption failed" in captured.out
 
 
 class TestCmdExport:
@@ -270,24 +264,21 @@ class TestCmdExport:
         from jkey.pv.export import cmd_export
 
         args = type("Args", (), {"type": "qr", "output": None})
-        cmd_export(args)
-        captured = capsys.readouterr()
-        assert "-o" in captured.out
+        with pytest.raises(JkeyError, match="-o"):
+            cmd_export(args)
 
     def test_export_all_no_output(self, vault, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda p="": "test-password")
         from jkey.pv.export import cmd_export
 
         args = type("Args", (), {"type": "all", "output": None})
-        cmd_export(args)
-        captured = capsys.readouterr()
-        assert "-o" in captured.out
+        with pytest.raises(JkeyError, match="-o"):
+            cmd_export(args)
 
     def test_export_wrong_password(self, vault, capsys, monkeypatch):
         monkeypatch.setattr("getpass.getpass", lambda p="": "wrong-password")
         from jkey.pv.export import cmd_export
 
         args = type("Args", (), {"type": "totp", "output": None})
-        cmd_export(args)
-        captured = capsys.readouterr()
-        assert "Incorrect password" in captured.out
+        with pytest.raises(JkeyError, match="Incorrect password"):
+            cmd_export(args)

@@ -187,3 +187,38 @@ class TestMainDispatch:
             main()
         captured = capsys.readouterr()
         assert "ls" in captured.out or "add" in captured.out
+
+    def test_main_wrong_password_exits_1(self, vault_dir, capsys, monkeypatch):
+        """Domain failure must surface as exit code 1 with an error on stderr."""
+        from jkey.pv.core import TOTP_FILE, encrypt_file
+
+        encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
+        monkeypatch.setattr("getpass.getpass", lambda p="": "wrong")
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        monkeypatch.setattr(sys, "argv", ["jkey", "2fa", "ls"])
+        from jkey.cli import main
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 1
+        captured = capsys.readouterr()
+        assert "Error:" in captured.err
+        assert "Failed to unlock vault" in captured.err
+
+    def test_main_success_returns_normally(self, vault_dir, capsys, monkeypatch):
+        """Successful command returns without SystemExit."""
+        monkeypatch.setattr(sys, "argv", ["jkey", "pm", "get", "-L", "12"])
+        from jkey.cli import main
+
+        main()
+        captured = capsys.readouterr()
+        assert len(captured.out.strip()) == 12
+
+    def test_main_ls_no_match_returns_normally(self, vault, capsys, monkeypatch):
+        """A listing with no matches is a successful invocation (exit 0)."""
+        monkeypatch.setattr(sys, "argv", ["jkey", "pm", "ls", "nothing-matches"])
+        from jkey.cli import main
+
+        main()
+        captured = capsys.readouterr()
+        assert "No passwords matching 'nothing-matches'." in captured.out

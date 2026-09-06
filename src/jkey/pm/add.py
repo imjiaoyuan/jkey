@@ -1,12 +1,9 @@
-import getpass
-
-from jkey.pm.core import load_passwords, save_passwords
+from jkey.errors import JkeyError
+from jkey.pv.core import load_passwords, prompt_password_confirmed, save_passwords
 
 
 def add_password(name: str):
     data = load_passwords()
-    if data is None:
-        return
 
     if name in data:
         while True:
@@ -16,41 +13,32 @@ def add_password(name: str):
                 )
             except (EOFError, KeyboardInterrupt):
                 print()
-                return
+                raise JkeyError("Cancelled.")
             if choice == "c":
-                return
+                raise JkeyError("Cancelled.")
             elif choice == "a":
-                try:
-                    suffix = input("Suffix: ").strip()
-                except (EOFError, KeyboardInterrupt):
-                    print()
-                    return
-                if not suffix:
-                    print("Suffix cannot be empty.")
-                    continue
-                name = f"{name}-{suffix}"
+                while True:
+                    try:
+                        suffix = input("Suffix: ").strip()
+                    except (EOFError, KeyboardInterrupt):
+                        print()
+                        raise JkeyError("Cancelled.")
+                    if not suffix:
+                        print("Suffix cannot be empty.")
+                        continue
+                    candidate = f"{name}-{suffix}"
+                    if candidate in data:
+                        print(f"'{candidate}' already exists.")
+                        continue
+                    name = candidate
+                    break
                 break
             elif choice == "o":
                 break
             else:
                 print("Invalid choice. Please enter 'o', 'a', or 'c'.")
 
-    try:
-        pw = getpass.getpass(f"Password for '{name}': ")
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if not pw:
-        print("Password cannot be empty.")
-        return
-    try:
-        pw2 = getpass.getpass(f"Confirm password for '{name}': ")
-    except (EOFError, KeyboardInterrupt):
-        print()
-        return
-    if pw != pw2:
-        print("Passwords do not match.")
-        return
+    pw = prompt_password_confirmed(f"Password for '{name}': ", f"Confirm password for '{name}': ")
     data[name] = pw
     save_passwords(data)
     print(f"Password stored: {name}")

@@ -1,3 +1,8 @@
+import pytest
+
+from jkey.errors import JkeyError
+
+
 class TestRcAdd:
     def test_add_from_file(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
@@ -11,27 +16,24 @@ class TestRcAdd:
     def test_add_file_not_found(self, vault, capsys):
         from jkey.rc.add import rc_add_file
 
-        rc_add_file("/nonexistent/file.txt")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            rc_add_file("/nonexistent/file.txt")
 
     def test_add_empty_file(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
 
         f = tmp_path / "empty.txt"
         f.write_text("")
-        rc_add_file(str(f))
-        captured = capsys.readouterr()
-        assert "No recovery codes found" in captured.out
+        with pytest.raises(JkeyError, match="No recovery codes found"):
+            rc_add_file(str(f))
 
     def test_add_file_only_whitespace(self, vault, tmp_path, capsys):
         from jkey.rc.add import rc_add_file
 
         f = tmp_path / "blank.txt"
         f.write_text("   \n\n  \n")
-        rc_add_file(str(f))
-        captured = capsys.readouterr()
-        assert "No recovery codes found" in captured.out
+        with pytest.raises(JkeyError, match="No recovery codes found"):
+            rc_add_file(str(f))
 
 
 class TestRcList:
@@ -98,9 +100,8 @@ class TestRcRemove:
     def test_remove_nonexistent(self, vault, capsys):
         from jkey.rc.rm import rc_remove
 
-        rc_remove("nonexistent")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            rc_remove("nonexistent")
 
 
 class Test2faRemove:
@@ -125,9 +126,8 @@ class Test2faRemove:
 
         remove_account = importlib.import_module("jkey.2fa.rm").remove_account
 
-        remove_account("nonexistent")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            remove_account("nonexistent")
 
 
 class TestPmAdd:
@@ -147,9 +147,8 @@ class TestPmAdd:
         from jkey.pm.add import add_password
 
         monkeypatch.setattr("getpass.getpass", lambda p="": "")
-        add_password("myapp")
-        captured = capsys.readouterr()
-        assert "cannot be empty" in captured.out
+        with pytest.raises(JkeyError, match="cannot be empty"):
+            add_password("myapp")
 
 
 class TestPmDelete:
@@ -172,9 +171,8 @@ class TestPmDelete:
     def test_delete_nonexistent(self, vault, capsys):
         from jkey.pm.rm import delete_password
 
-        delete_password("nonexistent")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            delete_password("nonexistent")
 
 
 class TestPmLsWarning:
@@ -294,6 +292,32 @@ class TestPmAddOverwrite:
         assert "Password stored: myapp-v2" in captured.out
         assert load_passwords() == {"myapp": "mysecret1", "myapp-v2": "mysecret2"}
 
+    def test_add_suffix_collision_reprompts(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import load_passwords
+
+        inputs = iter(
+            ["s0", "s0", "s1", "s1", "s2", "s2", "a", "v2", "v3", "s3", "s3"]
+        )
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        monkeypatch.setattr("builtins.input", lambda p="": next(inputs))
+
+        add_password("myapp")
+        add_password("myapp-v2")
+        capsys.readouterr()
+        add_password("myapp")
+        captured = capsys.readouterr()
+        assert "Password stored: myapp-v3" in captured.out
+        assert load_passwords() == {
+            "myapp": "s0",
+            "myapp-v2": "s1",
+            "myapp-v3": "s3",
+        }
+
     def test_cancel(self, vault, capsys, monkeypatch):
         from jkey.pm.add import add_password
         from jkey.pv.core import load_passwords
@@ -308,13 +332,13 @@ class TestPmAddOverwrite:
 
         add_password("myapp")
         capsys.readouterr()
-        add_password("myapp")
-        captured = capsys.readouterr()
-        assert "Password stored" not in captured.out
+        with pytest.raises(JkeyError, match="Cancelled"):
+            add_password("myapp")
         assert load_passwords() == {"myapp": "mysecret1"}
 
     def test_passwords_do_not_match(self, vault, capsys, monkeypatch):
         from jkey.pm.add import add_password
+        from jkey.pv.core import load_passwords
 
         inputs = iter(["pass1", "pass2"])
 
@@ -322,9 +346,9 @@ class TestPmAddOverwrite:
             return next(inputs)
 
         monkeypatch.setattr("getpass.getpass", mock_prompt)
-        add_password("newapp")
-        captured = capsys.readouterr()
-        assert "Passwords do not match" in captured.out
+        with pytest.raises(JkeyError, match="Passwords do not match"):
+            add_password("newapp")
+        assert load_passwords() == {}
 
 
 class TestRcAddOverwrite:
@@ -354,9 +378,8 @@ class TestRcAddOverwrite:
         capsys.readouterr()
 
         monkeypatch.setattr("builtins.input", lambda p="": "n")
-        rc_add_file(str(f))
-        captured = capsys.readouterr()
-        assert "Import cancelled" in captured.out
+        with pytest.raises(JkeyError, match="Import cancelled"):
+            rc_add_file(str(f))
         assert load_recovery() == {"test_rc": ["old1", "old2"]}
 
 
@@ -379,9 +402,8 @@ class TestPmEdit:
     def test_edit_nonexistent(self, vault, capsys):
         from jkey.pm.edit import edit_password
 
-        edit_password("nonexistent")
-        captured = capsys.readouterr()
-        assert "not found" in captured.out
+        with pytest.raises(JkeyError, match="not found"):
+            edit_password("nonexistent")
 
     def test_edit_empty_password(self, vault, capsys, monkeypatch):
         from jkey.pm.add import add_password
@@ -393,9 +415,8 @@ class TestPmEdit:
         capsys.readouterr()
 
         monkeypatch.setattr("getpass.getpass", lambda p="": "")
-        edit_password("myapp")
-        captured = capsys.readouterr()
-        assert "cannot be empty" in captured.out
+        with pytest.raises(JkeyError, match="cannot be empty"):
+            edit_password("myapp")
         assert load_passwords() == {"myapp": "oldsecret"}
 
     def test_edit_mismatch(self, vault, capsys, monkeypatch):
@@ -413,9 +434,8 @@ class TestPmEdit:
             return next(inputs)
 
         monkeypatch.setattr("getpass.getpass", mock_prompt)
-        edit_password("myapp")
-        captured = capsys.readouterr()
-        assert "do not match" in captured.out
+        with pytest.raises(JkeyError, match="do not match"):
+            edit_password("myapp")
         assert load_passwords() == {"myapp": "oldsecret"}
 
 
@@ -644,39 +664,64 @@ class TestPmImportCsv:
         assert "Preview" in captured.out
         assert load_passwords() == {}
 
+    def test_replace_dry_run_previews_as_new(self, vault, tmp_path, capsys):
+        from jkey.pm.import_csv import import_csv
+        from jkey.pv.core import load_passwords, save_passwords
+
+        save_passwords({"Google (user1)": "oldpass"})
+        capsys.readouterr()
+
+        f = tmp_path / "replace_dry.csv"
+        f.write_text("name,url,username,password\nGoogle,https://google.com,user1,newpass\n")
+        import_csv(str(f), dry_run=True, replace=True)
+        captured = capsys.readouterr()
+        assert "[NEW]" in captured.out
+        assert "1 new" in captured.out
+        assert "[SKIP]" not in captured.out
+        assert load_passwords() == {"Google (user1)": "oldpass"}
+
     def test_file_not_found(self, vault, capsys):
         from jkey.pm.import_csv import import_csv
 
-        import_csv("/nonexistent/passwords.csv")
-        captured = capsys.readouterr()
-        assert "not found" in captured.err
+        with pytest.raises(JkeyError, match="not found"):
+            import_csv("/nonexistent/passwords.csv")
 
     def test_empty_csv(self, vault, tmp_path, capsys):
         from jkey.pm.import_csv import import_csv
 
         f = tmp_path / "empty.csv"
         f.write_text("")
-        import_csv(str(f))
-        captured = capsys.readouterr()
-        assert "empty" in captured.err
+        with pytest.raises(JkeyError, match="empty"):
+            import_csv(str(f))
 
     def test_headers_only(self, vault, tmp_path, capsys):
         from jkey.pm.import_csv import import_csv
 
         f = tmp_path / "headers.csv"
         f.write_text("name,url,username,password\n")
-        import_csv(str(f))
-        captured = capsys.readouterr()
-        assert "no data rows" in captured.err
+        with pytest.raises(JkeyError, match="no data rows"):
+            import_csv(str(f))
 
     def test_no_password_column(self, vault, tmp_path, capsys):
         from jkey.pm.import_csv import import_csv
 
         f = tmp_path / "no_pw.csv"
         f.write_text("name,url,username\nA,https://a.com,u1\n")
-        import_csv(str(f))
-        captured = capsys.readouterr()
-        assert "password column" in captured.err
+        with pytest.raises(JkeyError, match="password column"):
+            import_csv(str(f))
+
+    def test_unreadable_file(self, vault, tmp_path, capsys, monkeypatch):
+        from jkey.pm.import_csv import import_csv
+
+        f = tmp_path / "locked.csv"
+        f.write_text("name,url,username,password\nA,https://a.com,u1,p1\n")
+
+        def deny_open(*args, **kwargs):
+            raise PermissionError("denied")
+
+        monkeypatch.setattr("builtins.open", deny_open)
+        with pytest.raises(JkeyError, match="Cannot read"):
+            import_csv(str(f))
 
     def test_skips_empty_passwords(self, vault, tmp_path, capsys):
         from jkey.pm.import_csv import import_csv

@@ -1,19 +1,12 @@
-from jkey.pv.core import (
-    delete_qr_image,
-    load_recovery,
-    load_totp,
-    save_recovery,
-    save_totp,
-)
+from jkey.errors import JkeyError
+from jkey.pv.core import delete_qr_image, load_recovery, load_totp, save_totp
+from jkey.rc.rm import remove_recovery
 
 
 def remove_account(account: str):
     data = load_totp()
-    if data is None:
-        return
     if account not in data:
-        print(f"Error: Account '{account}' not found.")
-        return
+        raise JkeyError(f"Account '{account}' not found.")
     del data[account]
     save_totp(data)
 
@@ -27,8 +20,7 @@ def remove_account(account: str):
             print()
             response = "n"
         if response == "y":
-            del rc[account]
-            save_recovery(rc)
+            remove_recovery(account)
         else:
             print("Recovery codes kept.")
 
