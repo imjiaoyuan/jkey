@@ -5,13 +5,19 @@ Python library for password management and TOTP verification.
 ## Install
 
 ```bash
-uv tool install jkey
+pipx install jkey
+```
+
+Or with plain pip:
+
+```bash
+pip install --user jkey
 ```
 
 Or run without installing:
 
 ```bash
-uv run jkey --help
+pipx run jkey --help
 ```
 
 ## Quick Start

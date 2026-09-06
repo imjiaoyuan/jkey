@@ -1,9 +1,8 @@
 {
   "mcpServers": {
     "code-review-graph": {
-      "command": "uvx",
+      "command": "/home/jiaoyuan/work/jkey/.venv/bin/code-review-graph",
       "args": [
-        "code-review-graph",
         "serve"
       ],
       "cwd": "/home/jiaoyuan/work/jkey",
