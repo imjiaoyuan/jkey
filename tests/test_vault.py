@@ -1,82 +1,84 @@
 import json
 import os
 
+import pytest
+
 from jkey import aes
+from jkey.errors import JkeyError
 
 
 class TestEnsureDir:
     def test_creates_directories(self, vault_dir):
-        from jkey.pv.core import CONFIG_DIR, QR_DIR, _ensure_dir
+        from jkey.pv.core import CONFIG_DIR, QR_DIR, ensure_dir
 
-        _ensure_dir()
+        ensure_dir()
         assert os.path.isdir(CONFIG_DIR)
         assert os.path.isdir(QR_DIR)
 
     def test_idempotent(self, vault_dir):
-        from jkey.pv.core import _ensure_dir
+        from jkey.pv.core import ensure_dir
 
-        _ensure_dir()
-        _ensure_dir()
+        ensure_dir()
+        ensure_dir()
 
 
 class TestReadWriteJkey:
     def test_write_and_read(self, vault_dir):
-        from jkey.pv.core import _read_jkey, _write_jkey
+        from jkey.pv.core import read_jkey, write_jkey
 
         data = {"hello": "world"}
         encrypted = aes.encrypt(data, "pw")
         path = os.path.join(vault_dir, "test.jkey")
-        _write_jkey(path, encrypted)
+        write_jkey(path, encrypted)
         assert os.path.exists(path)
-        loaded = _read_jkey(path)
+        loaded = read_jkey(path)
         assert loaded == encrypted
         assert aes.decrypt(loaded, "pw") == data
 
     def test_read_nonexistent(self, vault_dir):
-        from jkey.pv.core import _read_jkey
+        from jkey.pv.core import read_jkey
 
-        assert _read_jkey("/nonexistent/path.jkey") is None
+        assert read_jkey("/nonexistent/path.jkey") is None
 
     def test_read_empty_file(self, vault_dir, capsys):
-        from jkey.pv.core import _read_jkey
+        from jkey.pv.core import read_jkey
 
         path = os.path.join(vault_dir, "empty.jkey")
         with open(path, "w") as f:
             f.write("")
-        result = _read_jkey(path)
-        assert result is None
-        captured = capsys.readouterr()
-        assert "cannot read vault file" in captured.err
+        with pytest.raises(JkeyError, match="cannot read vault file"):
+            read_jkey(path)
 
 
 class TestEncryptDecryptFile:
     def test_roundtrip(self, vault_dir):
-        from jkey.pv.core import _decrypt_file, _encrypt_file
+        from jkey.pv.core import encrypt_file, read_jkey
 
         data = {"key": "value", "nested": {"a": [1, 2]}}
-        _encrypt_file(os.path.join(vault_dir, "test.jkey"), data, "password")
-        result = _decrypt_file(os.path.join(vault_dir, "test.jkey"), "password")
-        assert result == data
+        path = os.path.join(vault_dir, "test.jkey")
+        encrypt_file(path, data, "password")
+        assert aes.decrypt(read_jkey(path), "password") == data
 
     def test_wrong_password(self, vault_dir):
-        from jkey.pv.core import _decrypt_file, _encrypt_file
+        from jkey.pv.core import encrypt_file, read_jkey
 
-        _encrypt_file(os.path.join(vault_dir, "test.jkey"), {"a": 1}, "correct")
-        assert _decrypt_file(os.path.join(vault_dir, "test.jkey"), "wrong") is None
+        path = os.path.join(vault_dir, "test.jkey")
+        encrypt_file(path, {"a": 1}, "correct")
+        assert aes.decrypt(read_jkey(path), "wrong") is None
 
     def test_file_not_found(self, vault_dir):
-        from jkey.pv.core import _decrypt_file
+        from jkey.pv.core import read_jkey
 
-        assert _decrypt_file("/nonexistent.jkey", "pw") is None
+        assert read_jkey("/nonexistent.jkey") is None
 
 
 class TestSession:
     def test_save_and_load(self, vault_dir):
-        from jkey.pv.core import PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE, _encrypt_file, _load_session, _save_session
+        from jkey.pv.core import PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE, _load_session, _save_session, encrypt_file
 
-        _encrypt_file(TOTP_FILE, {"a": 1}, "pw")
-        _encrypt_file(PASSWORDS_FILE, {"b": 2}, "pw")
-        _encrypt_file(RECOVERY_FILE, {"c": 3}, "pw")
+        encrypt_file(TOTP_FILE, {"a": 1}, "pw")
+        encrypt_file(PASSWORDS_FILE, {"b": 2}, "pw")
+        encrypt_file(RECOVERY_FILE, {"c": 3}, "pw")
 
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
         assert _load_session() is True
@@ -126,12 +128,12 @@ class TestSession:
 
 class TestUnlockAll:
     def test_success(self, vault_dir):
-        from jkey.pv.core import PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE, _encrypt_file, _unlock_all
+        from jkey.pv.core import PASSWORDS_FILE, RECOVERY_FILE, TOTP_FILE, encrypt_file, unlock_all
 
-        _encrypt_file(TOTP_FILE, {"acc": "SECRET"}, "pw")
-        _encrypt_file(PASSWORDS_FILE, {"site": "pass"}, "pw")
-        _encrypt_file(RECOVERY_FILE, {"acc": ["rc1"]}, "pw")
-        assert _unlock_all("pw") is True
+        encrypt_file(TOTP_FILE, {"acc": "SECRET"}, "pw")
+        encrypt_file(PASSWORDS_FILE, {"site": "pass"}, "pw")
+        encrypt_file(RECOVERY_FILE, {"acc": ["rc1"]}, "pw")
+        assert unlock_all("pw") is True
         from jkey.pv.core import _passwords_cache, _recovery_cache, _session_password, _totp_cache
 
         assert _session_password == "pw"
@@ -140,31 +142,31 @@ class TestUnlockAll:
         assert _recovery_cache == {"acc": ["rc1"]}
 
     def test_wrong_password(self, vault_dir):
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, _unlock_all
+        from jkey.pv.core import TOTP_FILE, encrypt_file, unlock_all
 
-        _encrypt_file(TOTP_FILE, {"acc": "SECRET"}, "correct")
-        assert _unlock_all("wrong") is False
+        encrypt_file(TOTP_FILE, {"acc": "SECRET"}, "correct")
+        assert unlock_all("wrong") is False
         from jkey.pv.core import _session_password
 
         assert _session_password is None
 
     def test_missing_files(self, vault_dir):
-        from jkey.pv.core import _unlock_all
+        from jkey.pv.core import unlock_all
 
-        assert _unlock_all("pw") is False
+        assert unlock_all("pw") is False
 
 
 class TestVerifyPassword:
     def test_correct(self, vault_dir):
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, verify_password
+        from jkey.pv.core import TOTP_FILE, encrypt_file, verify_password
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
         assert verify_password("pw") is True
 
     def test_wrong(self, vault_dir):
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, verify_password
+        from jkey.pv.core import TOTP_FILE, encrypt_file, verify_password
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
         assert verify_password("wrong") is False
 
     def test_no_vault(self, vault_dir):
@@ -209,7 +211,8 @@ class TestLoadSaveTotp:
     def test_load_when_locked(self, vault_dir):
         from jkey.pv.core import load_totp
 
-        assert load_totp() is None
+        with pytest.raises(JkeyError, match="Vault not initialized"):
+            load_totp()
 
 
 class TestLoadSavePasswords:
@@ -222,7 +225,8 @@ class TestLoadSavePasswords:
     def test_load_when_locked(self, vault_dir):
         from jkey.pv.core import load_passwords
 
-        assert load_passwords() is None
+        with pytest.raises(JkeyError, match="Vault not initialized"):
+            load_passwords()
 
 
 class TestLoadSaveRecovery:
@@ -235,7 +239,8 @@ class TestLoadSaveRecovery:
     def test_load_when_locked(self, vault_dir):
         from jkey.pv.core import load_recovery
 
-        assert load_recovery() is None
+        with pytest.raises(JkeyError, match="Vault not initialized"):
+            load_recovery()
 
 
 class TestQRImages:
@@ -263,86 +268,92 @@ class TestQRImages:
 
         assert list_qr_images() == []
 
-    def test_save_when_locked(self, vault_dir):
+    def test_save_when_locked(self, vault_dir, capsys):
         from jkey.pv.core import save_qr_image
 
-        save_qr_image("test", b"data")
+        with pytest.raises(JkeyError, match="vault is locked"):
+            save_qr_image("test", b"data")
 
 
 class TestEnsureUnlocked:
     def test_already_unlocked(self, vault):
-        from jkey.pv.core import _ensure_unlocked
+        from jkey.pv.core import ensure_unlocked
 
-        assert _ensure_unlocked() is True
+        assert ensure_unlocked() is None
 
     def test_no_vault(self, vault_dir):
-        from jkey.pv.core import _ensure_unlocked
+        from jkey.pv.core import ensure_unlocked
 
-        assert _ensure_unlocked() is False
+        with pytest.raises(JkeyError, match="Vault not initialized"):
+            ensure_unlocked()
 
     def test_with_env_password(self, vault_dir, monkeypatch):
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, _ensure_unlocked
+        from jkey.pv.core import TOTP_FILE, encrypt_file, ensure_unlocked
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "env-pw")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "env-pw")
         monkeypatch.setenv("JKEY_PASS", "env-pw")
-        assert _ensure_unlocked() is True
+        assert ensure_unlocked() is None
 
     def test_with_wrong_env_password(self, vault_dir, monkeypatch):
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, _ensure_unlocked
+        from jkey.pv.core import TOTP_FILE, encrypt_file, ensure_unlocked
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "correct-pw")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "correct-pw")
         monkeypatch.setenv("JKEY_PASS", "wrong-pw")
         monkeypatch.setattr("getpass.getpass", lambda p="": "wrong-too")
-        assert _ensure_unlocked() is False
+        with pytest.raises(JkeyError, match="JKEY_PASS environment variable contains incorrect password"):
+            ensure_unlocked()
 
     def test_with_session(self, vault_dir):
         from jkey.pv.core import (
             TOTP_FILE,
-            _encrypt_file,
-            _ensure_unlocked,
             _save_session,
+            encrypt_file,
+            ensure_unlocked,
         )
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "pw")
         _save_session("pw", {"a": "b"}, {}, {})
-        assert _ensure_unlocked() is True
+        assert ensure_unlocked() is None
 
 
 class TestPromptPassword:
     def test_interactive_correct(self, vault_dir, monkeypatch):
         """Test ensure_unlocked with interactive password prompt."""
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, _ensure_unlocked
+        from jkey.pv.core import TOTP_FILE, encrypt_file, ensure_unlocked
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
         monkeypatch.setattr("getpass.getpass", lambda p="": "correct")
-        assert _ensure_unlocked() is True
+        assert ensure_unlocked() is None
 
     def test_interactive_wrong_then_correct(self, vault_dir, monkeypatch):
         """Test 3 attempts with wrong then correct password."""
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, _ensure_unlocked
+        from jkey.pv.core import TOTP_FILE, encrypt_file, ensure_unlocked
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
         answers = iter(["wrong1", "wrong2", "correct"])
 
         monkeypatch.setattr("getpass.getpass", lambda p="": next(answers))
-        assert _ensure_unlocked() is True
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        assert ensure_unlocked() is None
 
     def test_interactive_all_wrong(self, vault_dir, monkeypatch):
         """Test 3 wrong attempts should fail."""
-        from jkey.pv.core import TOTP_FILE, _encrypt_file, _ensure_unlocked
+        from jkey.pv.core import TOTP_FILE, encrypt_file, ensure_unlocked
 
-        _encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
+        encrypt_file(TOTP_FILE, {"a": "b"}, "correct")
         monkeypatch.setattr("getpass.getpass", lambda p="": "wrong")
-        assert _ensure_unlocked() is False
+        monkeypatch.setattr("time.sleep", lambda s: None)
+        with pytest.raises(JkeyError, match="Failed to unlock vault"):
+            ensure_unlocked()
 
 
 class TestSessionV2:
     def test_save_and_load_sv3(self, vault_dir):
         import jkey.pv.core as core
 
-        core._encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
-        core._encrypt_file(core.PASSWORDS_FILE, {"a": 1}, "pw")
-        core._encrypt_file(core.RECOVERY_FILE, {"a": 1}, "pw")
+        core.encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
+        core.encrypt_file(core.PASSWORDS_FILE, {"a": 1}, "pw")
+        core.encrypt_file(core.RECOVERY_FILE, {"a": 1}, "pw")
 
         core._save_session("pw", {"a": 1}, {}, {})
         with open(core.SESSION_FILE) as f:
@@ -353,11 +364,9 @@ class TestSessionV2:
     def test_activity_based_timeout_reset(self, vault_dir, monkeypatch):
         import jkey.pv.core as core
 
-        monkeypatch.setattr(core, "_SESSION_SAVE_INTERVAL", 0)
-
-        core._encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
-        core._encrypt_file(core.PASSWORDS_FILE, {}, "pw")
-        core._encrypt_file(core.RECOVERY_FILE, {}, "pw")
+        core.encrypt_file(core.TOTP_FILE, {"a": 1}, "pw")
+        core.encrypt_file(core.PASSWORDS_FILE, {}, "pw")
+        core.encrypt_file(core.RECOVERY_FILE, {}, "pw")
 
         core._save_session("pw", {"a": 1}, {}, {})
         original_expires = json.load(open(core.SESSION_FILE))["expires"]
@@ -373,7 +382,7 @@ class TestSessionV2:
     def test_old_session_rejected(self, vault_dir):
         import jkey.pv.core as core
 
-        core._encrypt_file(core.TOTP_FILE, {"old": "data"}, "pw")
+        core.encrypt_file(core.TOTP_FILE, {"old": "data"}, "pw")
         old_session = {
             "sv": 2,
             "password": "pw",
@@ -391,42 +400,38 @@ class TestSaveWhenLocked:
     def test_save_totp_locked(self, vault_dir, capsys):
         from jkey.pv.core import save_totp
 
-        save_totp({"test": "secret"})
-        captured = capsys.readouterr()
-        assert "vault is locked" in captured.err
+        with pytest.raises(JkeyError, match="vault is locked"):
+            save_totp({"test": "secret"})
 
     def test_save_passwords_locked(self, vault_dir, capsys):
         from jkey.pv.core import save_passwords
 
-        save_passwords({"test": "secret"})
-        captured = capsys.readouterr()
-        assert "vault is locked" in captured.err
+        with pytest.raises(JkeyError, match="vault is locked"):
+            save_passwords({"test": "secret"})
 
     def test_save_recovery_locked(self, vault_dir, capsys):
         from jkey.pv.core import save_recovery
 
-        save_recovery({"test": ["rc1"]})
-        captured = capsys.readouterr()
-        assert "vault is locked" in captured.err
+        with pytest.raises(JkeyError, match="vault is locked"):
+            save_recovery({"test": ["rc1"]})
 
     def test_save_qr_locked(self, vault_dir, capsys):
         from jkey.pv.core import save_qr_image
 
-        save_qr_image("test", b"data")
-        captured = capsys.readouterr()
-        assert "vault is locked" in captured.err
+        with pytest.raises(JkeyError, match="vault is locked"):
+            save_qr_image("test", b"data")
 
 
 class TestStaleTmpHandling:
     def test_write_jkey_removes_stale_tmp(self, vault_dir):
-        from jkey.pv.core import _write_jkey
+        from jkey.pv.core import write_jkey
 
         path = os.path.join(vault_dir, "test.jkey")
         tmp = path + ".tmp"
         with open(tmp, "w") as f:
             f.write("stale")
         os.chmod(tmp, 0o600)
-        _write_jkey(path, {"test": "data"})
+        write_jkey(path, {"test": "data"})
         assert os.path.exists(path)
         assert not os.path.exists(tmp)
 
@@ -444,3 +449,37 @@ class TestJkeyExtConstant:
         save_qr_image("uses_const", b"data")
         names = list_qr_images()
         assert "uses_const" in names
+
+
+class TestChangeMasterPassword:
+    def test_staging_failure_keeps_old_files(self, vault):
+        """A write failure mid-re-encrypt must leave all vault files on the old password."""
+        import jkey.pv.core as core
+
+        core.save_totp({"acc": "SECRET"})
+        core.save_passwords({"site": "pass"})
+
+        def fail_replace(src, dst):
+            raise OSError("disk full")
+
+        # Separate MonkeyPatch scope: undo() here must not revert the vault_dir fixture's patches.
+        mp = pytest.MonkeyPatch()
+        mp.setattr("jkey.pv.core.os.replace", fail_replace)
+        try:
+            with pytest.raises(JkeyError, match="failed to re-encrypt vault"):
+                core.change_master_password("New-Password-123!")
+        finally:
+            mp.undo()
+
+        assert core.verify_password("test-password") is True
+        assert core.verify_password("New-Password-123!") is False
+
+    def test_success_rekeys_all_files(self, vault):
+        import jkey.pv.core as core
+
+        core.save_totp({"acc": "SECRET"})
+        assert core.change_master_password("New-Password-123!") is True
+        assert core._session_password == "New-Password-123!"
+        assert core.verify_password("New-Password-123!") is True
+        assert core.verify_password("test-password") is False
+        assert core.load_totp() == {"acc": "SECRET"}

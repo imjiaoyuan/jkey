@@ -22,7 +22,7 @@ def _b32_decode(s: str) -> bytes:
     return base64.b32decode(s)
 
 
-def _validate_b32_secret(s: str) -> bool:
+def validate_b32_secret(s: str) -> bool:
     try:
         _b32_decode(s)
         return True

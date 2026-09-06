@@ -1,10 +1,10 @@
 import csv
 import io
 import os
-import sys
 from urllib.parse import urlparse
 
-from jkey.pm.core import load_passwords, save_passwords
+from jkey.errors import JkeyError
+from jkey.pv.core import load_passwords, save_passwords
 
 _COLUMN_ALIASES = {
     "name": ["name", "title", "account"],
@@ -132,15 +132,21 @@ def _process_row(row: list[str], mapping: dict[str, int], data: dict, mode: str,
     return {"action": "new", "name": name, "final_name": final_name, "username": username, "password": password}
 
 
-def _detect_encoding_and_read(file_path: str) -> tuple[str | None, str | None]:
-    """Try common encodings and return (encoding, content) or (None, None)."""
+def _detect_encoding_and_read(file_path: str) -> str | None:
+    """Try common encodings and return the file content, or None if it cannot be read."""
     for encoding in ("utf-8-sig", "utf-8", "utf-16", "latin-1"):
         try:
             with open(file_path, encoding=encoding) as f:
-                return encoding, f.read()
+                return f.read()
         except (UnicodeDecodeError, UnicodeError):
             continue
-    return None, None
+        except OSError:
+            return None
+    return None
+
+
+def _masked(password: str) -> str:
+    return (password[:3] + "***") if len(password) > 3 else "***"
 
 
 def import_csv(
@@ -151,50 +157,41 @@ def import_csv(
     replace: bool = False,
 ) -> None:
     if not os.path.exists(file_path):
-        print(f"Error: File not found: {file_path}", file=sys.stderr)
-        return
+        raise JkeyError(f"File not found: {file_path}")
 
-    encoding, content = _detect_encoding_and_read(file_path)
+    content = _detect_encoding_and_read(file_path)
     if content is None:
-        print(f"Error: Cannot read '{file_path}' — unsupported encoding.", file=sys.stderr)
-        return
+        raise JkeyError(f"Cannot read '{file_path}'.")
 
     try:
         reader = csv.reader(io.StringIO(content))
         rows = list(reader)
     except csv.Error as e:
-        print(f"Error: Cannot parse CSV: {e}", file=sys.stderr)
-        return
+        raise JkeyError(f"Cannot parse CSV: {e}") from e
 
     if not rows:
-        print("Error: CSV file is empty.", file=sys.stderr)
-        return
+        raise JkeyError("CSV file is empty.")
 
     headers = rows[0]
     data_rows = rows[1:]
 
     mapping = _detect_format(headers)
     if "password" not in mapping:
-        print(
-            "Error: Could not detect a password column. "
-            "Supported column names: " + ", ".join(_COLUMN_ALIASES["password"]),
-            file=sys.stderr,
+        raise JkeyError(
+            "Could not detect a password column. "
+            "Supported column names: " + ", ".join(_COLUMN_ALIASES["password"])
         )
-        return
 
     if not data_rows:
-        print("CSV has headers but no data rows.", file=sys.stderr)
-        return
+        raise JkeyError("CSV has headers but no data rows.")
 
     data = load_passwords()
-    if data is None:
-        return
 
     if replace and not dry_run:
         data.clear()
 
     if dry_run:
-        _print_dry_run(data_rows, mapping, data, duplicates)
+        _print_dry_run(data_rows, mapping, {} if replace else data, duplicates)
         return
 
     imported: list[tuple[str, str, str]] = []
@@ -211,15 +208,15 @@ def import_csv(
             if result["reason"] == "short_row":
                 skipped_short += 1
                 if verbose:
-                    print(f"  skip short-row {i + 2}: {','.join(row)[:60]}", file=sys.stderr)
+                    print(f"  skip short-row {i + 2}: {','.join(row)[:60]}")
             elif result["reason"] == "empty_pw":
                 skipped_empty_pw.append(result["name"])
                 if verbose:
-                    print(f"  skip empty-pw: {result['name']}", file=sys.stderr)
+                    print(f"  skip empty-pw: {result['name']}")
             elif result["reason"] == "duplicate":
                 skipped_dup.append(result["name"])
                 if verbose:
-                    print(f"  skip duplicate: {result['name']}", file=sys.stderr)
+                    print(f"  skip duplicate: {result['name']}")
             continue
 
         final_name = result["final_name"]
@@ -281,8 +278,7 @@ def import_csv(
 
 def _print_entries(entries: list[tuple[str, str, str]]) -> None:
     for name, username, password in entries:
-        masked = password[:3] + "***"
-        print(f"  {name}: {masked}")
+        print(f"  {name}: {_masked(password)}")
 
 
 def _print_dry_run(data_rows: list[list[str]], mapping: dict[str, int], existing: dict, mode: str) -> None:
@@ -309,7 +305,7 @@ def _print_dry_run(data_rows: list[list[str]], mapping: dict[str, int], existing
             elif result["reason"] == "duplicate":
                 skip_count += 1
                 status = "[SKIP]"
-                masked = result["password"][:3] + "***"
+                masked = _masked(result["password"])
                 print(f"    {status:<12} {result['final_name']:<48} {result['username']:<32} {masked:<12}")
             continue
 
@@ -320,8 +316,7 @@ def _print_dry_run(data_rows: list[list[str]], mapping: dict[str, int], existing
             new_count += 1
             status = "[NEW]"
 
-        masked = result["password"][:3] + "***"
-        print(f"    {status:<12} {result['final_name']:<48} {result['username']:<32} {masked:<12}")
+        print(f"    {status:<12} {result['final_name']:<48} {result['username']:<32} {_masked(result['password']):<12}")
 
     print(f"    {'─' * 12} {'─' * 48} {'─' * 32} {'─' * 12}")
     parts = []

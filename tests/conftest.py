@@ -29,20 +29,9 @@ def vault(vault_dir):
     import jkey.pv.core as core
 
     pw = "test-password"
-    core._ensure_dir()
-    core._encrypt_file(core.TOTP_FILE, {}, pw)
-    core._encrypt_file(core.PASSWORDS_FILE, {}, pw)
-    core._encrypt_file(core.RECOVERY_FILE, {}, pw)
-    core._unlock_all(pw)
+    core.ensure_dir()
+    core.encrypt_file(core.TOTP_FILE, {}, pw)
+    core.encrypt_file(core.PASSWORDS_FILE, {}, pw)
+    core.encrypt_file(core.RECOVERY_FILE, {}, pw)
+    core.unlock_all(pw)
     return core
-
-
-@pytest.fixture
-def mock_getpass(monkeypatch):
-    """Mock getpass.getpass to return a fixed password."""
-
-    def _mock(prompt="", pw="test-password"):
-        monkeypatch.setattr("getpass.getpass", lambda p="": pw)
-        return pw
-
-    return _mock

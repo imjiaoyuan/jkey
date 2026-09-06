@@ -4,7 +4,6 @@ import hashlib
 import hmac
 import json
 import os
-import sys
 
 SBOX = [
     0x63,
@@ -502,11 +501,7 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         iv = base64.b64decode(encrypted["iv"])
         ciphertext = base64.b64decode(encrypted["data"])
         stored_mac = base64.b64decode(encrypted["mac"])
-    except KeyError as e:
-        print(f"Warning: decryption failed — missing key {e}", file=sys.stderr)
-        return None
-    except (TypeError, binascii.Error) as e:
-        print(f"Warning: decryption failed — invalid data: {e}", file=sys.stderr)
+    except (KeyError, TypeError, binascii.Error):
         return None
 
     version = encrypted.get("version", 1)
@@ -526,6 +521,5 @@ def decrypt(encrypted: dict, password: str) -> dict | None:
         padded = aes_cbc_decrypt(ciphertext, enc_key, iv)
         plaintext = _pkcs7_unpad(padded)
         return json.loads(plaintext.decode("utf-8"))
-    except (ValueError, json.JSONDecodeError, UnicodeDecodeError) as e:
-        print(f"Warning: decryption failed — malformed plaintext: {e}", file=sys.stderr)
+    except (ValueError, json.JSONDecodeError, UnicodeDecodeError):
         return None

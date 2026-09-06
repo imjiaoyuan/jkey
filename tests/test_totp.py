@@ -4,7 +4,7 @@ import time
 _core = importlib.import_module("jkey.2fa.core")
 _hotp = _core._hotp
 _b32_decode = _core._b32_decode
-_validate_b32_secret = _core._validate_b32_secret
+_validate_b32_secret = _core.validate_b32_secret
 totp = _core.totp
 
 

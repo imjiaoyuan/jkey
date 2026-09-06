@@ -2,7 +2,10 @@ import os
 import sys
 from urllib.parse import parse_qs, unquote, urlparse
 
+from jkey.errors import JkeyError
 from jkey.pv.core import load_totp, save_qr_image, save_totp
+
+from .core import validate_b32_secret
 
 try:
     import cv2
@@ -21,35 +24,32 @@ def _resize_if_large(img, max_size=1000):
 
 def scan_and_add(image_path: str) -> None:
     if cv2 is None:
-        print("Error: opencv-python-headless is required for QR scanning.")
-        print("Install with: pip install opencv-python-headless")
-        return
+        raise JkeyError(
+            "opencv-python-headless is required for QR scanning. Install with: pip install opencv-python-headless"
+        )
     if not os.path.exists(image_path):
-        print(f"Error: File not found: {image_path}")
-        return
+        raise JkeyError(f"File not found: {image_path}")
 
     img = cv2.imread(image_path)
     if img is None:
-        print(f"Error: Could not read image: {image_path}")
-        return
+        raise JkeyError(f"Could not read image: {image_path}")
 
     small = _resize_if_large(img)
     detector = cv2.QRCodeDetector()
-    data, _, _ = detector.detectAndDecode(small)
-    if not data:
-        print("Error: No QR code found in the image.")
-        return
+    decoded, _, _ = detector.detectAndDecode(small)
+    if not decoded:
+        raise JkeyError("No QR code found in the image.")
 
-    parsed = urlparse(data)
+    parsed = urlparse(decoded)
     if parsed.scheme != "otpauth":
-        print(f"Error: Not a valid otpauth:// URL: {data}")
-        return
+        raise JkeyError(f"Not a valid otpauth:// URL: {decoded}")
 
     params = parse_qs(parsed.query)
     secret = params.get("secret", [None])[0]
     if not secret:
-        print("Error: No secret found in QR code.")
-        return
+        raise JkeyError("No secret found in QR code.")
+    if not validate_b32_secret(secret):
+        raise JkeyError(f"Invalid base32 secret in QR code: {secret!r}")
 
     path = unquote(parsed.path).lstrip("/")
     issuer = params.get("issuer", [None])[0]
@@ -63,8 +63,14 @@ def scan_and_add(image_path: str) -> None:
         name = issuer or "unknown"
 
     data = load_totp()
-    if data is None:
-        return
+    if name in data:
+        try:
+            response = input(f"'{name}' already exists. Overwrite? (y/N): ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise JkeyError("Import cancelled.")
+        if response != "y":
+            raise JkeyError("Import cancelled.")
     data[name] = secret
     save_totp(data)
     print(f"Added 2FA account: {name}")

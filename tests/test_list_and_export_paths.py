@@ -4,6 +4,8 @@ import json
 
 import pytest
 
+from jkey.errors import JkeyError
+
 
 class _FakeImage:
     shape = (100, 100, 3)
@@ -34,9 +36,81 @@ class Test2faAddPaths:
         monkeypatch.setattr(mod.cv2, "imread", lambda _p: _FakeImage())
         monkeypatch.setattr(mod.cv2, "QRCodeDetector", lambda: _FakeDetector("https://example.com"))
 
+        with pytest.raises(JkeyError, match="Not a valid otpauth://"):
+            mod.scan_and_add("/tmp/qr.png")
+
+    @pytest.mark.skipif(
+        not importlib.import_module("jkey.2fa.add").cv2,
+        reason="opencv-python-headless not installed",
+    )
+    def test_scan_invalid_secret_rejected(self, monkeypatch, capsys):
+        mod = importlib.import_module("jkey.2fa.add")
+        stored = {}
+
+        monkeypatch.setattr(mod.os.path, "exists", lambda _p: True)
+        monkeypatch.setattr(mod.cv2, "imread", lambda _p: _FakeImage())
+        monkeypatch.setattr(
+            mod.cv2,
+            "QRCodeDetector",
+            lambda: _FakeDetector("otpauth://totp/account?secret=not-base32-!!!"),
+        )
+        monkeypatch.setattr(mod, "load_totp", lambda: {})
+        monkeypatch.setattr(mod, "save_totp", lambda data: stored.update(data))
+
+        with pytest.raises(JkeyError, match="Invalid base32 secret"):
+            mod.scan_and_add("/tmp/qr.png")
+        assert stored == {}
+
+    @pytest.mark.skipif(
+        not importlib.import_module("jkey.2fa.add").cv2,
+        reason="opencv-python-headless not installed",
+    )
+    def test_scan_duplicate_declined_keeps_old_secret(self, monkeypatch, capsys):
+        mod = importlib.import_module("jkey.2fa.add")
+        stored = {"GitHub:account": "OLDSECRET"}
+
+        monkeypatch.setattr(mod.os.path, "exists", lambda _p: True)
+        monkeypatch.setattr(mod.cv2, "imread", lambda _p: _FakeImage())
+        monkeypatch.setattr(
+            mod.cv2,
+            "QRCodeDetector",
+            lambda: _FakeDetector("otpauth://totp/account?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"),
+        )
+        monkeypatch.setattr(mod, "load_totp", lambda: dict(stored))
+        monkeypatch.setattr(mod, "save_totp", lambda data: stored.update(data))
+        monkeypatch.setattr(mod.cv2, "imencode", lambda _ext, _img: (True, _FakeEncoded()))
+        monkeypatch.setattr(mod, "save_qr_image", lambda _name, _data: None)
+        monkeypatch.setattr("builtins.input", lambda p="": "n")
+
+        with pytest.raises(JkeyError, match="Import cancelled"):
+            mod.scan_and_add("/tmp/qr.png")
+        assert stored == {"GitHub:account": "OLDSECRET"}
+
+    @pytest.mark.skipif(
+        not importlib.import_module("jkey.2fa.add").cv2,
+        reason="opencv-python-headless not installed",
+    )
+    def test_scan_duplicate_confirmed_overwrites(self, monkeypatch, capsys):
+        mod = importlib.import_module("jkey.2fa.add")
+        stored = {"GitHub:account": "OLDSECRET"}
+
+        monkeypatch.setattr(mod.os.path, "exists", lambda _p: True)
+        monkeypatch.setattr(mod.cv2, "imread", lambda _p: _FakeImage())
+        monkeypatch.setattr(
+            mod.cv2,
+            "QRCodeDetector",
+            lambda: _FakeDetector("otpauth://totp/account?secret=JBSWY3DPEHPK3PXP&issuer=GitHub"),
+        )
+        monkeypatch.setattr(mod, "load_totp", lambda: dict(stored))
+        monkeypatch.setattr(mod, "save_totp", lambda data: stored.update(data))
+        monkeypatch.setattr(mod.cv2, "imencode", lambda _ext, _img: (True, _FakeEncoded()))
+        monkeypatch.setattr(mod, "save_qr_image", lambda _name, _data: None)
+        monkeypatch.setattr("builtins.input", lambda p="": "y")
+
         mod.scan_and_add("/tmp/qr.png")
         captured = capsys.readouterr()
-        assert "Not a valid otpauth://" in captured.out
+        assert "Added 2FA account: GitHub:account" in captured.out
+        assert stored["GitHub:account"] == "JBSWY3DPEHPK3PXP"
 
     @pytest.mark.skipif(
         not importlib.import_module("jkey.2fa.add").cv2,
@@ -89,8 +163,8 @@ class TestExportPaths:
     def test_export_uses_env_password_without_prompt(self, monkeypatch, capsys):
         mod = importlib.import_module("jkey.pv.export")
 
-        monkeypatch.setattr(mod, "_ensure_unlocked", lambda: True)
-        monkeypatch.setattr(mod, "_password_from_env", lambda: "from-env")
+        monkeypatch.setattr(mod, "ensure_unlocked", lambda: True)
+        monkeypatch.setattr(mod, "password_from_env", lambda: "from-env")
         monkeypatch.setattr(mod, "get_session_password", lambda: "from-env")
         monkeypatch.setattr(mod, "load_totp", lambda: {"github": "JBSWY3DPEHPK3PXP"})
 
@@ -102,8 +176,8 @@ class TestExportPaths:
     def test_export_qr_writes_images(self, monkeypatch, tmp_path, capsys):
         mod = importlib.import_module("jkey.pv.export")
 
-        monkeypatch.setattr(mod, "_ensure_unlocked", lambda: True)
-        monkeypatch.setattr(mod, "_password_from_env", lambda: "pw")
+        monkeypatch.setattr(mod, "ensure_unlocked", lambda: True)
+        monkeypatch.setattr(mod, "password_from_env", lambda: "pw")
         monkeypatch.setattr(mod, "get_session_password", lambda: "pw")
         monkeypatch.setattr(mod, "list_qr_images", lambda: ["acc1"])
         monkeypatch.setattr(mod, "load_qr_image", lambda _name: b"image-bytes")
@@ -117,8 +191,8 @@ class TestExportPaths:
     def test_export_all_writes_combined_outputs(self, monkeypatch, tmp_path):
         mod = importlib.import_module("jkey.pv.export")
 
-        monkeypatch.setattr(mod, "_ensure_unlocked", lambda: True)
-        monkeypatch.setattr(mod, "_password_from_env", lambda: "pw")
+        monkeypatch.setattr(mod, "ensure_unlocked", lambda: True)
+        monkeypatch.setattr(mod, "password_from_env", lambda: "pw")
         monkeypatch.setattr(mod, "get_session_password", lambda: "pw")
         monkeypatch.setattr(mod, "load_totp", lambda: {"github": "JBSWY3DPEHPK3PXP"})
         monkeypatch.setattr(mod, "load_passwords", lambda: {"site": "pass"})
