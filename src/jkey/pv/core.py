@@ -6,10 +6,15 @@ import platform
 import sys
 import time
 
-import portalocker
-
-from jkey import aes
 from jkey.errors import JkeyError
+
+
+def _aes():
+    """Import the AES module lazily so session-cached reads avoid its import cost."""
+    from jkey import aes
+
+    return aes
+
 
 if platform.system() == "Windows":
     _config_base = os.environ.get("APPDATA", os.path.expanduser("~"))
@@ -52,6 +57,8 @@ def _sanitize_filename(name: str) -> str:
 
 @contextlib.contextmanager
 def _lock_vault(shared: bool = False):
+    import portalocker
+
     ensure_dir()
     mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
     with portalocker.Lock(VAULT_LOCK_PATH, "a+", flags=mode) as _fh:
@@ -149,17 +156,44 @@ def _load_session() -> bool:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return False
-    if not isinstance(data, dict) or data.get("sv", 1) < 3:
-        return False
-    if time.time() >= data["expires"]:
+    if not isinstance(data, dict):
         _clear_session()
         return False
-    _session_password = data["password"]
-    _totp_cache = data["totp"]
-    _passwords_cache = data["passwords"]
-    _recovery_cache = data["recovery"]
+    sv = data.get("sv", 1)
+    expires = data.get("expires")
+    password = data.get("password")
+    totp = data.get("totp")
+    passwords = data.get("passwords")
+    recovery = data.get("recovery")
+    if not isinstance(sv, int) or sv < 3 or not isinstance(expires, (int, float)):
+        _clear_session()
+        return False
+    if time.time() >= expires:
+        _clear_session()
+        return False
+    if not isinstance(password, str) or not all(isinstance(c, dict) for c in (totp, passwords, recovery)):
+        _clear_session()
+        return False
+    _session_password = password
+    _totp_cache = totp
+    _passwords_cache = passwords
+    _recovery_cache = recovery
     _save_session(_session_password, _totp_cache, _passwords_cache, _recovery_cache)
     return True
+
+
+def has_session() -> bool:
+    """Return True if a non-expired session cache exists on disk without loading it."""
+    try:
+        with open(SESSION_FILE) as f:
+            data = json.load(f)
+    except (OSError, json.JSONDecodeError):
+        return False
+    if not isinstance(data, dict):
+        return False
+    sv = data.get("sv", 1)
+    expires = data.get("expires")
+    return isinstance(sv, int) and sv >= 3 and isinstance(expires, (int, float)) and time.time() < expires
 
 
 def _clear_session():
@@ -199,7 +233,8 @@ def write_secure_text(
             f.write(content)
         os.replace(tmp, path)
     else:
-        with open(path, "w", encoding=encoding, newline=newline) as f:
+        fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
             f.write(content)
         os.chmod(path, 0o600)
 
@@ -227,7 +262,7 @@ def _decrypt_all(password: str) -> dict[str, dict] | None:
         encrypted = read_jkey(path)
         if encrypted is None:
             return None
-        decrypted = aes.decrypt(encrypted, password)
+        decrypted = _aes().decrypt(encrypted, password)
         if decrypted is None:
             return None
         result[key] = decrypted
@@ -293,8 +328,18 @@ def lock():
     _clear_session()
 
 
+def set_unlocked(password: str, totp: dict, passwords: dict, recovery: dict) -> None:
+    """Populate the in-memory session without re-deriving keys (used right after init)."""
+    global _session_password, _totp_cache, _passwords_cache, _recovery_cache
+    _session_password = password
+    _totp_cache = totp
+    _passwords_cache = passwords
+    _recovery_cache = recovery
+    _save_session(password, totp, passwords, recovery)
+
+
 def encrypt_file(path: str, data: dict, password: str):
-    write_jkey(path, aes.encrypt(data, password))
+    write_jkey(path, _aes().encrypt(data, password))
 
 
 def change_master_password(new_password: str) -> bool:
@@ -308,6 +353,7 @@ def change_master_password(new_password: str) -> bool:
     with _lock_vault():
         staged = []
         try:
+            aes = _aes()
             for path, data in files:
                 payload = json.dumps(aes.encrypt(data, new_password), indent=4, ensure_ascii=False)
                 staged.append((path, _stage_write(path, payload.encode("utf-8"))))
@@ -325,7 +371,7 @@ def change_master_password(new_password: str) -> bool:
 
 def load_totp() -> dict:
     ensure_unlocked()
-    return _totp_cache or {}
+    return dict(_totp_cache or {})
 
 
 def save_totp(data: dict):
@@ -340,7 +386,7 @@ def save_totp(data: dict):
 
 def load_passwords() -> dict:
     ensure_unlocked()
-    return _passwords_cache or {}
+    return dict(_passwords_cache or {})
 
 
 def save_passwords(data: dict):
@@ -355,7 +401,7 @@ def save_passwords(data: dict):
 
 def load_recovery() -> dict:
     ensure_unlocked()
-    return _recovery_cache or {}
+    return dict(_recovery_cache or {})
 
 
 def save_recovery(data: dict):
@@ -378,7 +424,7 @@ def save_qr_image(name: str, image_data: bytes):
         raise JkeyError("vault is locked. Changes not saved.")
     ensure_dir()
     encoded = base64.b64encode(image_data).decode("ascii")
-    encrypted = aes.encrypt({"raw": encoded}, pw)
+    encrypted = _aes().encrypt({"raw": encoded}, pw)
     write_jkey(_qr_path(name), encrypted)
 
 
@@ -413,7 +459,7 @@ def load_qr_image(name: str) -> bytes | None:
     encrypted = read_jkey(path)
     if encrypted is None:
         return None
-    data = aes.decrypt(encrypted, pw)
+    data = _aes().decrypt(encrypted, pw)
     if data is None or "raw" not in data:
         return None
     return base64.b64decode(data["raw"])

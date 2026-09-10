@@ -1,9 +1,9 @@
 from jkey.errors import JkeyError
-from jkey.pv.core import ensure_unlocked, is_unlocked, vault_exists
+from jkey.pv.core import ensure_unlocked, has_session, is_unlocked, vault_exists
 
 
 def cmd_unlock():
-    if is_unlocked():
+    if is_unlocked() or has_session():
         print("Vault is already unlocked.")
         return
     if not vault_exists():

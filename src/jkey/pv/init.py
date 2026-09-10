@@ -22,5 +22,5 @@ def cmd_init():
     for path in (core.TOTP_FILE, core.PASSWORDS_FILE, core.RECOVERY_FILE):
         if not os.path.exists(path):
             core.encrypt_file(path, {}, pw)
-    core.unlock_all(pw)
+    core.set_unlocked(pw, {}, {}, {})
     print(f"Vault initialized at {core.CONFIG_DIR}")

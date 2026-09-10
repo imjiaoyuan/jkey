@@ -1,6 +1,8 @@
 # jkey
 
-Python library for password management and TOTP verification.
+Cross-platform command-line password manager and TOTP verifier.
+
+All data is encrypted with AES-256-CBC + HMAC-SHA256 and stored per data type under `~/.config/jkey/`. Pure Python — no OpenSSL or libsodium required.
 
 ## Install
 
@@ -62,6 +64,7 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey pm add <name>` | Store a password (prompts for input) |
 | `jkey pm edit <name>` | Update an existing password |
 | `jkey pm rm <name>` | Delete a stored password |
+| `jkey pm import <file.csv>` | Import passwords from a browser CSV export |
 | `jkey pv init` | Initialize the encrypted vault |
 | `jkey pv unlock` | Unlock the vault |
 | `jkey pv lock` | Lock the vault |
@@ -75,7 +78,7 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey pv export qr -o <dir>` | Export QR code images |
 | `jkey pv export all -o <dir>` | Export everything |
 
-Set `JKEY_PASS` environment variable to skip the password prompt.
+Set `JKEY_PASS` environment variable to skip the password prompt. Set `JKEY_SESSION_TIMEOUT` to change the session cache lifetime (default: 300 seconds).
 
 ## How It Works
 
@@ -94,6 +97,9 @@ Back up `~/.config/jkey/` (excluding `.session`) to migrate to another machine.
 
 ## Dependencies
 
-- `opencv-python-headless` — QR code scanning
+Runtime dependencies:
+
+- `portalocker` — cross-platform vault file locking
+- `opencv-python-headless` — optional, needed only for `jkey 2fa add` QR scanning. Install with `pip install jkey[qr]`.
 
 Pure Python, no OpenSSL or libsodium required.
