@@ -125,6 +125,24 @@ class TestSession:
             f.write("not json")
         assert _load_session() is False
 
+    def test_session_missing_fields(self, vault_dir):
+        from jkey.pv.core import SESSION_FILE, _load_session
+
+        with open(SESSION_FILE, "w") as f:
+            json.dump({"sv": 3, "password": "pw"}, f)
+        assert _load_session() is False
+        assert not os.path.exists(SESSION_FILE)
+
+    def test_has_session_false_without_file(self, vault_dir):
+        from jkey.pv.core import has_session
+
+        assert has_session() is False
+
+    def test_has_session_true_after_unlock(self, vault):
+        from jkey.pv.core import has_session
+
+        assert has_session() is True
+
 
 class TestUnlockAll:
     def test_success(self, vault_dir):
@@ -213,6 +231,14 @@ class TestLoadSaveTotp:
 
         with pytest.raises(JkeyError, match="Vault not initialized"):
             load_totp()
+
+    def test_load_returns_copy(self, vault):
+        from jkey.pv.core import load_totp, save_totp
+
+        save_totp({"a": "b"})
+        data = load_totp()
+        data["c"] = "d"
+        assert load_totp() == {"a": "b"}
 
 
 class TestLoadSavePasswords:

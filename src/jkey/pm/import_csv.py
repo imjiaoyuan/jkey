@@ -178,8 +178,7 @@ def import_csv(
     mapping = _detect_format(headers)
     if "password" not in mapping:
         raise JkeyError(
-            "Could not detect a password column. "
-            "Supported column names: " + ", ".join(_COLUMN_ALIASES["password"])
+            "Could not detect a password column. Supported column names: " + ", ".join(_COLUMN_ALIASES["password"])
         )
 
     if not data_rows:
@@ -247,6 +246,9 @@ def import_csv(
                     print(f"  - {n}")
         else:
             print("No new entries to import.")
+        if replace:
+            save_passwords(data)
+            print("Existing passwords replaced with an empty set.")
         return
 
     save_passwords(data)

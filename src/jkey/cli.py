@@ -1,7 +1,6 @@
 import argparse
 import importlib
 import sys
-from importlib.metadata import version
 
 from jkey.errors import JkeyError
 
@@ -10,12 +9,27 @@ def _call(mod_name, func_name, *args, **kwargs):
     return getattr(importlib.import_module(mod_name), func_name)(*args, **kwargs)
 
 
+class _VersionAction(argparse.Action):
+    """Print the installed version, importing importlib.metadata only when asked."""
+
+    def __init__(self, option_strings, dest, **kwargs):
+        super().__init__(option_strings, dest, nargs=0, **kwargs)
+
+    def __call__(self, parser, namespace, values, option_string=None):
+        from importlib.metadata import version
+
+        parser._print_message(f"{parser.prog} {version('jkey')}\n", sys.stdout)
+        parser.exit()
+
+
 def _build_parser():
     parser = argparse.ArgumentParser(
         prog="jkey",
         description="Python library for password management and TOTP verification",
     )
-    parser.add_argument("-v", "--version", action="version", version=f"%(prog)s {version('jkey')}")
+    parser.add_argument(
+        "-v", "--version", action=_VersionAction, default=argparse.SUPPRESS, help="show version and exit"
+    )
     sub = parser.add_subparsers(dest="command")
 
     p = sub.add_parser("2fa", help="Manage TOTP 2FA accounts")

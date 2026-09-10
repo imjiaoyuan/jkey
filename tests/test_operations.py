@@ -296,9 +296,7 @@ class TestPmAddOverwrite:
         from jkey.pm.add import add_password
         from jkey.pv.core import load_passwords
 
-        inputs = iter(
-            ["s0", "s0", "s1", "s1", "s2", "s2", "a", "v2", "v3", "s3", "s3"]
-        )
+        inputs = iter(["s0", "s0", "s1", "s1", "s2", "s2", "a", "v2", "v3", "s3", "s3"])
 
         def mock_prompt(p=""):
             return next(inputs)
@@ -770,3 +768,19 @@ class TestPmImportCsv:
         import_csv(str(f))
         captured = capsys.readouterr()
         assert "No new entries" in captured.out
+
+    def test_replace_with_no_valid_rows_persists_clear(self, vault, tmp_path, capsys):
+        from jkey import aes
+        from jkey.pm.import_csv import import_csv
+        from jkey.pv import core
+        from jkey.pv.core import load_passwords, save_passwords
+
+        save_passwords({"old-entry": "oldpass"})
+        capsys.readouterr()
+
+        f = tmp_path / "all_skip_replace.csv"
+        f.write_text("name,password\nfoo,\n")
+        import_csv(str(f), replace=True)
+        capsys.readouterr()
+        assert load_passwords() == {}
+        assert aes.decrypt(core.read_jkey(core.PASSWORDS_FILE), "test-password") == {}

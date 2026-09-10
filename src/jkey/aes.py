@@ -275,16 +275,33 @@ def _xtime(a):
     return ((a << 1) ^ 0x11B) & 0xFF if a & 0x80 else (a << 1) & 0xFF
 
 
-_GF_MUL = [[0] * 256 for _ in range(256)]
-for _a in range(256):
-    for _b in range(256):
-        r, a, b = 0, _a, _b
-        for _ in range(8):
-            if b & 1:
-                r ^= a
-            a = _xtime(a)
-            b >>= 1
-        _GF_MUL[_a][_b] = r
+_GF_MUL = None
+
+
+def _gf_mul_table():
+    """Build the GF(2^8) multiplication table on first use."""
+    global _GF_MUL
+    if _GF_MUL is not None:
+        return _GF_MUL
+
+    exp = [0] * 512
+    log = [0] * 256
+    x = 1
+    for i in range(255):
+        exp[i] = x
+        log[x] = i
+        x ^= _xtime(x)  # multiply by the generator 3
+    for i in range(255, 512):
+        exp[i] = exp[i - 255]
+
+    table = [[0] * 256 for _ in range(256)]
+    for a in range(1, 256):
+        la = log[a]
+        row = table[a]
+        for b in range(1, 256):
+            row[b] = exp[la + log[b]]
+    _GF_MUL = table
+    return table
 
 
 def _sub_word(word):
@@ -366,7 +383,7 @@ def _inv_shift_rows(state):
 
 
 def _mix_columns(state):
-    gm = _GF_MUL
+    gm = _gf_mul_table()
     for i in range(4):
         a = [state[j][i] for j in range(4)]
         state[0][i] = gm[2][a[0]] ^ gm[3][a[1]] ^ a[2] ^ a[3]
@@ -376,7 +393,7 @@ def _mix_columns(state):
 
 
 def _inv_mix_columns(state):
-    gm = _GF_MUL
+    gm = _gf_mul_table()
     for i in range(4):
         a = [state[j][i] for j in range(4)]
         state[0][i] = gm[14][a[0]] ^ gm[11][a[1]] ^ gm[13][a[2]] ^ gm[9][a[3]]

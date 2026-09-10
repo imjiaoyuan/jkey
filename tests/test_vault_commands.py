@@ -106,6 +106,29 @@ class TestCmdLock:
         assert "Vault locked" in captured.out
         assert is_unlocked() is False
 
+    def test_lock_clears_session_from_previous_process(self, vault, capsys):
+        import jkey.pv.core as core
+        from jkey.pv.lock import cmd_lock
+
+        assert core.has_session() is True
+        # Simulate a fresh process: in-memory state is empty but the session file remains.
+        core._session_password = None
+        core._totp_cache = None
+        core._passwords_cache = None
+        core._recovery_cache = None
+
+        cmd_lock()
+        assert "Vault locked" in capsys.readouterr().out
+        assert core.has_session() is False
+
+
+class TestCmdStatus:
+    def test_status_reports_unlocked_session(self, vault, capsys):
+        from jkey.pv.status import cmd_status
+
+        cmd_status()
+        assert "Vault unlocked: yes" in capsys.readouterr().out
+
 
 class TestCmdSetPw:
     def test_set_pw_no_vault(self, vault_dir, capsys):

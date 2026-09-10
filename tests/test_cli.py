@@ -178,6 +178,15 @@ class TestMainDispatch:
             main()
         assert exc.value.code == 1
 
+    def test_main_version(self, capsys, monkeypatch):
+        monkeypatch.setattr(sys, "argv", ["jkey", "-v"])
+        from jkey.cli import main
+
+        with pytest.raises(SystemExit) as exc:
+            main()
+        assert exc.value.code == 0
+        assert "jkey" in capsys.readouterr().out
+
     def test_main_2fa_help(self, capsys, monkeypatch):
 
         monkeypatch.setattr(sys, "argv", ["jkey", "2fa", "--help"])
