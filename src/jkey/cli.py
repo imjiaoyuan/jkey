@@ -96,6 +96,43 @@ def _build_parser():
     x.add_argument("type", choices=["totp", "passwords", "recovery", "qr", "all"])
     x.add_argument("-o", "--output")
 
+    p = sub.add_parser("backup", help="Back up vault to S3 or a local path")
+    p2 = p.add_subparsers(dest="baction")
+    a = p2.add_parser("add", help="Configure a backup remote")
+    a.add_argument("name")
+    a.add_argument("url", help="s3://bucket/prefix or a local path")
+    a.add_argument("--endpoint", help="S3-compatible endpoint (OSS, COS, MinIO, R2, B2)")
+    a.add_argument("--region", help="S3 region")
+    a.add_argument("--access-key", help="Access key (stored in remotes.json; omit to use AWS default chain)")
+    a.add_argument("--secret-key", help="Secret key (prompted if --access-key is given without it)")
+    a.add_argument("-k", "--keep", type=int, help="Snapshots to keep (default 5)")
+    a.add_argument("--no-test", action="store_true", help="Skip the connectivity test after adding")
+    a.add_argument("-f", "--force", action="store_true", help="Overwrite an existing remote")
+    p2.add_parser("ls", help="List backup remotes (credentials masked)")
+    a = p2.add_parser("rm", help="Remove a backup remote")
+    a.add_argument("name")
+    a.add_argument("-y", "--yes", action="store_true", help="Skip confirmation")
+    a = p2.add_parser("cred", help="Set or clear inline S3 credentials")
+    a.add_argument("name")
+    a.add_argument("--access-key")
+    a.add_argument("--secret-key")
+    a.add_argument("--clear", action="store_true", help="Clear inline credentials (use AWS default chain)")
+    a = p2.add_parser("test", help="Test remote connectivity (write, read back, delete)")
+    a.add_argument("name")
+    a = p2.add_parser("run", help="Run a backup now")
+    a.add_argument("name", nargs="?", default=None, help="Remote name (omit = all remotes)")
+    a.add_argument("-k", "--keep", type=int, help="Snapshots to keep (overrides remote config)")
+    a = p2.add_parser("snaps", help="List snapshots on a remote")
+    a.add_argument("name")
+    a = p2.add_parser("restore", help="Restore a snapshot")
+    a.add_argument("name")
+    a.add_argument("-d", "--date", help="Snapshot stamp YYYYMMDD-HHMMSS (default: latest)")
+    a.add_argument("-o", "--output", help="Restore directory (default: ./jkey-restore-<stamp>)")
+    a.add_argument("--into-vault", action="store_true", help="Overwrite the live vault after confirmation")
+    a = p2.add_parser("verify", help="Verify snapshot checksums on a remote")
+    a.add_argument("name")
+    a.add_argument("-d", "--date", help="Snapshot stamp YYYYMMDD-HHMMSS (default: all)")
+
     return parser
 
 
@@ -132,6 +169,8 @@ def main():
             _pm(args)
         elif args.command == "pv":
             _pv(args)
+        elif args.command == "backup":
+            _backup(args)
     except JkeyError as e:
         print(f"Error: {e}", file=sys.stderr)
         sys.exit(1)
@@ -219,3 +258,11 @@ def _pv(args):
         "export": ("jkey.pv.export", "cmd_export", lambda a: (a,)),
     }
     _route(args, "pv", routes)
+
+
+def _backup(args):
+    routes = {
+        action: ("jkey.pv.backup.core", "cmd_backup", lambda a: (a,))
+        for action in ("add", "ls", "rm", "cred", "test", "run", "snaps", "restore", "verify")
+    }
+    _route(args, "backup", routes)
