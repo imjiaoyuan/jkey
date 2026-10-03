@@ -77,8 +77,54 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey pv export recovery` | Export recovery codes |
 | `jkey pv export qr -o <dir>` | Export QR code images |
 | `jkey pv export all -o <dir>` | Export everything |
+| `jkey backup add <name> <url>` | Configure a backup remote (`s3://bucket/prefix` or local path) |
+| `jkey backup ls` | List backup remotes (credentials masked) |
+| `jkey backup rm <name>` | Remove a backup remote |
+| `jkey backup cred <name>` | Set or clear inline S3 credentials |
+| `jkey backup test <name>` | Test remote connectivity (write → read → delete) |
+| `jkey backup run [name]` | Back up now (omit name = all remotes) |
+| `jkey backup snaps <name>` | List snapshots on a remote |
+| `jkey backup restore <name>` | Restore a snapshot (default: latest) |
+| `jkey backup verify <name>` | Verify snapshot checksums on the remote |
 
 Set `JKEY_PASS` environment variable to skip the password prompt. Set `JKEY_SESSION_TIMEOUT` to change the session cache lifetime (default: 300 seconds).
+
+## Backup & Restore
+
+Backups copy the **already-encrypted** vault files (`.jkey`) to a remote as timestamped tar.gz snapshots — no master password is needed, nothing plaintext ever leaves the machine. `.session` is never backed up.
+
+```bash
+pip install "jkey[s3]"   # S3 support (local-path remotes need no extra dependency)
+
+# AWS S3 — credentials come from the standard AWS chain (~/.aws, env vars, IAM role)
+jkey backup add aws s3://my-bucket/jkey --region ap-east-1
+
+# S3-compatible providers (Aliyun OSS, Tencent COS, MinIO, Cloudflare R2, Backblaze B2)
+jkey backup add oss s3://my-bucket/jkey \
+    --endpoint https://oss-cn-hangzhou.aliyuncs.com \
+    --region cn-hangzhou --access-key LTAI... --secret-key ***
+
+# Local path (NAS mount, USB drive) — no credentials involved
+jkey backup add nas /mnt/nas/jkey-backup -k 10
+
+jkey backup test aws              # PUT → GET → DELETE probe
+jkey backup run                   # back up to all remotes
+jkey backup run aws -k 5          # keep the last 5 snapshots on this remote
+jkey backup snaps aws             # list remote snapshots
+jkey backup verify aws            # sha256-check remote snapshots
+
+# Restore to a directory (safe mode; never touches the live vault)
+jkey backup restore aws
+jkey backup restore aws -d 20250611-143022 -o ./restored
+
+# Restore directly into the vault (asks for confirmation, transactional)
+jkey backup restore aws --into-vault
+jkey pv status                       # then unlock once to verify the restored vault
+```
+
+Snapshots are pruned automatically: `-k/--keep` or the remote's configured `keep` (default 5) — only the newest N snapshots stay on the remote.
+
+Credentials resolve in two steps: inline `--access-key`/`--secret-key` stored in `~/.config/jkey/remotes.json` (mode 600) win; otherwise boto3's default chain applies (env vars → `~/.aws/credentials` → IAM role). Manage inline credentials with `jkey backup cred <name>` / `--clear`; `ls` output is always masked.
 
 ## How It Works
 
@@ -87,13 +133,14 @@ Data is encrypted with AES-256-CBC + HMAC-SHA256 and stored in `~/.config/jkey/`
 ```
 ~/.config/jkey/
 ├── .session          # Session cache (5 min timeout)
+├── remotes.json      # Backup remote configs (mode 600; never contains vault data)
 ├── totp.jkey         # Encrypted TOTP secrets
 ├── passwords.jkey    # Encrypted passwords
 ├── recovery.jkey     # Encrypted recovery codes
 └── qr/               # Encrypted QR images
 ```
 
-Back up `~/.config/jkey/` (excluding `.session`) to migrate to another machine.
+For machine migration use `jkey backup run` + `jkey backup restore --into-vault`, or manually back up `~/.config/jkey/` (excluding `.session`).
 
 ## Dependencies
 
@@ -101,5 +148,6 @@ Runtime dependencies:
 
 - `portalocker` — cross-platform vault file locking
 - `opencv-python-headless` — optional, needed only for `jkey 2fa add` QR scanning. Install with `pip install jkey[qr]`.
+- `boto3` — optional, needed only for `s3://` backup remotes. Install with `pip install jkey[s3]`.
 
 Pure Python, no OpenSSL or libsodium required.
