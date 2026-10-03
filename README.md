@@ -89,6 +89,8 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 
 Set `JKEY_PASS` environment variable to skip the password prompt. Set `JKEY_SESSION_TIMEOUT` to change the session cache lifetime (default: 300 seconds).
 
+Sessions work like `sudo`'s per-TTY tickets: unlocking in one terminal window does **not** unlock other windows — each window authenticates on its own use. `jkey pv lock` locks every window at once.
+
 ## Backup & Restore
 
 Backups copy the **already-encrypted** vault files (`.jkey`) to a remote as timestamped tar.gz snapshots — no master password is needed, nothing plaintext ever leaves the machine. `.session` is never backed up.
@@ -132,7 +134,7 @@ Data is encrypted with AES-256-CBC + HMAC-SHA256 and stored in `~/.config/jkey/`
 
 ```
 ~/.config/jkey/
-├── .session          # Session cache (5 min timeout)
+├── sessions/         # Per-terminal session tickets (sudo-style, 5 min activity timeout)
 ├── remotes.json      # Backup remote configs (mode 600; never contains vault data)
 ├── totp.jkey         # Encrypted TOTP secrets
 ├── passwords.jkey    # Encrypted passwords
@@ -140,7 +142,7 @@ Data is encrypted with AES-256-CBC + HMAC-SHA256 and stored in `~/.config/jkey/`
 └── qr/               # Encrypted QR images
 ```
 
-For machine migration use `jkey backup run` + `jkey backup restore --into-vault`, or manually back up `~/.config/jkey/` (excluding `.session`).
+For machine migration use `jkey backup run` + `jkey backup restore --into-vault`, or manually back up `~/.config/jkey/` (excluding `sessions/`).
 
 ## Dependencies
 

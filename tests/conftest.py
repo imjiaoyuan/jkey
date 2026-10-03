@@ -14,7 +14,8 @@ def vault_dir(tmp_path, monkeypatch):
     monkeypatch.setattr(core, "PASSWORDS_FILE", os.path.join(d, "passwords.jkey"))
     monkeypatch.setattr(core, "RECOVERY_FILE", os.path.join(d, "recovery.jkey"))
     monkeypatch.setattr(core, "QR_DIR", os.path.join(d, "qr"))
-    monkeypatch.setattr(core, "SESSION_FILE", os.path.join(d, ".session"))
+    monkeypatch.setattr(core, "SESSION_DIR", os.path.join(d, "sessions"))
+    monkeypatch.setattr(core, "_LEGACY_SESSION_FILE", os.path.join(d, ".session"))
     monkeypatch.setattr(core, "VAULT_LOCK_PATH", os.path.join(d, ".lock"))
     yield tmp_path
     core._session_password = None

@@ -103,13 +103,14 @@ class TestSession:
 
         with patch("jkey.pv.core.time.time", return_value=now + core.SESSION_TIMEOUT + 1):
             assert core._load_session() is False
-        assert not os.path.exists(core.SESSION_FILE)
+        assert not os.path.exists(core._session_file())
 
     def test_session_file_format(self, vault_dir):
-        from jkey.pv.core import SESSION_FILE, _save_session
+        import jkey.pv.core as core
+        from jkey.pv.core import _save_session
 
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
-        with open(SESSION_FILE) as f:
+        with open(core._session_file()) as f:
             raw = json.load(f)
         assert raw["sv"] == 3
         assert raw["password"] == "pw"
@@ -119,19 +120,23 @@ class TestSession:
         assert "expires" in raw
 
     def test_corrupted_session(self, vault_dir):
-        from jkey.pv.core import SESSION_FILE, _load_session
+        import jkey.pv.core as core
+        from jkey.pv.core import _load_session
 
-        with open(SESSION_FILE, "w") as f:
+        os.makedirs(core.SESSION_DIR, exist_ok=True)
+        with open(core._session_file(), "w") as f:
             f.write("not json")
         assert _load_session() is False
 
     def test_session_missing_fields(self, vault_dir):
-        from jkey.pv.core import SESSION_FILE, _load_session
+        import jkey.pv.core as core
+        from jkey.pv.core import _load_session
 
-        with open(SESSION_FILE, "w") as f:
+        os.makedirs(core.SESSION_DIR, exist_ok=True)
+        with open(core._session_file(), "w") as f:
             json.dump({"sv": 3, "password": "pw"}, f)
         assert _load_session() is False
-        assert not os.path.exists(SESSION_FILE)
+        assert not os.path.exists(core._session_file())
 
     def test_has_session_false_without_file(self, vault_dir):
         from jkey.pv.core import has_session
@@ -142,6 +147,76 @@ class TestSession:
         from jkey.pv.core import has_session
 
         assert has_session() is True
+
+
+class TestTtyTickets:
+    """sudo-style per-terminal sessions: each TTY gets its own ticket."""
+
+    def test_other_terminal_ticket_not_loaded(self, vault, monkeypatch):
+        import jkey.pv.core as core
+
+        # Terminal A unlocks (vault fixture already did) -> ticket saved for A.
+        assert core.has_session() is True
+        # Terminal B (different TTY) must not see A's ticket.
+        monkeypatch.setattr(core, "_terminal_id", lambda: "/dev/pts/1")
+        assert core._load_session() is False
+        assert core.has_session(this_terminal_only=True) is False
+        # ...but the global view (status/lock) still sees A's live ticket.
+        assert core.has_session() is True
+
+    def test_same_terminal_ticket_reloads(self, vault, monkeypatch):
+        import jkey.pv.core as core
+
+        tid = "/dev/pts/42"
+        monkeypatch.setattr(core, "_terminal_id", lambda: tid)
+        core._save_session("pw", {"a": 1}, {}, {})
+        core._session_password = None
+        core._totp_cache = None
+        assert core._load_session() is True
+        assert core._session_password == "pw"
+
+    def test_lock_clears_all_terminals(self, vault, monkeypatch):
+        import jkey.pv.core as core
+
+        for tid in ("/dev/pts/1", "/dev/pts/2", "/dev/pts/3"):
+            monkeypatch.setattr(core, "_terminal_id", lambda t=tid: t)
+            core._save_session("pw", {}, {}, {})
+        assert core.has_session() is True
+        core.lock()
+        assert core.has_session() is False
+        assert list(core._iter_session_files()) == []
+
+    def test_no_tty_shares_none_slot(self, vault, monkeypatch):
+        import jkey.pv.core as core
+
+        monkeypatch.setattr(core, "_terminal_id", lambda: "none")
+        core._save_session("pw", {}, {}, {})
+        monkeypatch.setattr(core, "_terminal_id", lambda: "/dev/pts/9")
+        assert core._load_session() is False  # TTY process does not see the no-TTY ticket
+
+    def test_ticket_invalidated_when_vault_files_change(self, vault, monkeypatch):
+        import jkey.pv.core as core
+
+        # Terminal A holds a ticket...
+        monkeypatch.setattr(core, "_terminal_id", lambda: "/dev/pts/1")
+        core._save_session("pw", {"a": 1}, {}, {})
+        # ...then terminal B writes -> on-disk fingerprint changes.
+        monkeypatch.setattr(core, "_terminal_id", lambda: "/dev/pts/2")
+        core.save_totp({"other": "B"})
+        # A's cached data is now stale: its ticket must be rejected, not reloaded.
+        monkeypatch.setattr(core, "_terminal_id", lambda: "/dev/pts/1")
+        core._session_password = None
+        core._totp_cache = None
+        assert core._load_session() is False
+        assert not os.path.exists(core._session_file())
+
+    def test_legacy_dot_session_removed(self, vault):
+        import jkey.pv.core as core
+
+        with open(core._LEGACY_SESSION_FILE, "w") as f:
+            f.write('{"sv": 3, "password": "old"}')
+        core._save_session("pw", {}, {}, {})
+        assert not os.path.exists(core._LEGACY_SESSION_FILE)
 
 
 class TestUnlockAll:
@@ -382,7 +457,7 @@ class TestSessionV2:
         core.encrypt_file(core.RECOVERY_FILE, {"a": 1}, "pw")
 
         core._save_session("pw", {"a": 1}, {}, {})
-        with open(core.SESSION_FILE) as f:
+        with open(core._session_file()) as f:
             raw = json.load(f)
         assert raw["sv"] == 3
         assert core._load_session() is True
@@ -395,14 +470,14 @@ class TestSessionV2:
         core.encrypt_file(core.RECOVERY_FILE, {}, "pw")
 
         core._save_session("pw", {"a": 1}, {}, {})
-        original_expires = json.load(open(core.SESSION_FILE))["expires"]
+        original_expires = json.load(open(core._session_file()))["expires"]
 
         import time as _time
 
         _time.sleep(0.01)
 
         assert core._load_session() is True
-        new_expires = json.load(open(core.SESSION_FILE))["expires"]
+        new_expires = json.load(open(core._session_file()))["expires"]
         assert new_expires > original_expires
 
     def test_old_session_rejected(self, vault_dir):
@@ -417,7 +492,8 @@ class TestSessionV2:
             "recovery": {},
             "expires": core.time.time() + 300,
         }
-        with open(core.SESSION_FILE, "w") as f:
+        os.makedirs(core.SESSION_DIR, exist_ok=True)
+        with open(core._session_file(), "w") as f:
             json.dump(old_session, f)
         assert core._load_session() is False
 
