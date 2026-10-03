@@ -492,6 +492,28 @@ class TestLifecycle:
         assert core.load_totp() == {"github:me": "JBSWY3DPEHPK3PXP"}
         assert core.load_passwords() == {"my-site": "hunter2"}
 
+    def test_restore_into_vault_invalidates_all_sessions(self, vault, backup_dir, monkeypatch):
+        """Regression: files replaced on disk must invalidate every terminal's cached session,
+        else a stale cache gets written back over the restored vault (silent data loss)."""
+        import jkey.pv.backup.core as bc
+        import jkey.pv.core as core
+
+        _fake_vault(vault)
+        _add_local_remote("nas", backup_dir)
+        bc._cmd_run(_args(name="nas"))
+        assert core.has_session() is True
+
+        monkeypatch.setattr("builtins.input", lambda *_: "y")
+        bc._cmd_restore(_args(name="nas", into_vault=True))
+
+        # Every ticket gone and in-memory cache dropped -> next command must re-authenticate
+        # from the restored files (wrong JKEY_PASS proves it actually re-decrypts).
+        assert core.has_session() is False
+        assert core.is_unlocked() is False
+        monkeypatch.setenv("JKEY_PASS", "definitely-wrong")
+        with pytest.raises(JkeyError, match="incorrect password"):
+            core.load_totp()
+
     def test_restore_into_vault_declined(self, vault, backup_dir, monkeypatch):
         import jkey.pv.backup.core as bc
         import jkey.pv.core as core
