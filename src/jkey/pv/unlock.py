@@ -3,7 +3,7 @@ from jkey.pv.core import ensure_unlocked, has_session, is_unlocked, vault_exists
 
 
 def cmd_unlock():
-    if is_unlocked() or has_session():
+    if is_unlocked() or has_session(this_terminal_only=True):
         print("Vault is already unlocked.")
         return
     if not vault_exists():

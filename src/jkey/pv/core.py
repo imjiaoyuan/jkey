@@ -1,5 +1,6 @@
 import base64
 import contextlib
+import hashlib
 import json
 import os
 import platform
@@ -25,7 +26,7 @@ TOTP_FILE = os.path.join(CONFIG_DIR, "totp.jkey")
 PASSWORDS_FILE = os.path.join(CONFIG_DIR, "passwords.jkey")
 RECOVERY_FILE = os.path.join(CONFIG_DIR, "recovery.jkey")
 QR_DIR = os.path.join(CONFIG_DIR, "qr")
-SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
+SESSION_DIR = os.path.join(CONFIG_DIR, "sessions")
 SESSION_TIMEOUT = int(os.environ.get("JKEY_SESSION_TIMEOUT", "300"))
 VAULT_LOCK_PATH = os.path.join(CONFIG_DIR, ".lock")
 _JKEY_EXT = ".jkey"
@@ -133,8 +134,66 @@ def _atomic_write(path: str, data: bytes):
     os.replace(_stage_write(path, data), path)
 
 
+def _terminal_id() -> str:
+    """Stable per-terminal id: the controlling TTY, or 'none' when stdin has no TTY.
+
+    sudo-style tty tickets — each terminal window authenticates separately, so unlocking in
+    window A never leaves a live ticket for window B. Pipelines/cron (no TTY) share the
+    'none' slot, which is the same single-session behavior as before.
+    """
+    try:
+        return os.ttyname(sys.stdin.fileno())
+    except (OSError, ValueError, AttributeError):
+        return "none"
+
+
+def _session_file(terminal_id: str | None = None) -> str:
+    """Path of one terminal's ticket under SESSION_DIR; tests patch SESSION_DIR."""
+    tid = terminal_id if terminal_id is not None else _terminal_id()
+    h = hashlib.sha256(tid.encode("utf-8")).hexdigest()[:16]
+    return os.path.join(SESSION_DIR, h + ".json")
+
+
+def _iter_session_files():
+    """All ticket files, including expired ones (for lock / status sweeping)."""
+    try:
+        names = os.listdir(SESSION_DIR)
+    except OSError:
+        return
+    for name in names:
+        if name.endswith(".json"):
+            yield os.path.join(SESSION_DIR, name)
+
+
+_LEGACY_SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
+
+
+def _remove_legacy_session():
+    """Drop the pre-tty-tickets plaintext .session so no stale master password lingers."""
+    with contextlib.suppress(OSError):
+        os.unlink(_LEGACY_SESSION_FILE)
+
+
+def _vault_fingerprint() -> str:
+    """Cheap change-detector over the on-disk vault files (hash bytes, no decryption).
+
+    Tickets record the fingerprint at save time; if another process (or a backup restore)
+    replaced the files since, the ticket no longer matches and is rejected — a stale
+    in-memory cache can never be written back over newer data.
+    """
+    h = hashlib.sha256()
+    for path in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE):
+        try:
+            with open(path, "rb") as f:
+                h.update(f.read())
+        except OSError:
+            pass
+    return h.hexdigest()
+
+
 def _save_session(password, totp, passwords, recovery):
     ensure_dir()
+    os.makedirs(SESSION_DIR, mode=0o700, exist_ok=True)
     payload = {
         "sv": 3,
         "password": password,
@@ -142,17 +201,20 @@ def _save_session(password, totp, passwords, recovery):
         "passwords": passwords,
         "recovery": recovery,
         "expires": time.time() + SESSION_TIMEOUT,
+        "vault_fp": _vault_fingerprint(),
     }
+    _remove_legacy_session()
     try:
-        _atomic_write(SESSION_FILE, json.dumps(payload).encode("utf-8"))
+        _atomic_write(_session_file(), json.dumps(payload).encode("utf-8"))
     except OSError as e:
         print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
 
 
 def _load_session() -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
+    path = _session_file()
     try:
-        with open(SESSION_FILE) as f:
+        with open(path) as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return False
@@ -174,6 +236,11 @@ def _load_session() -> bool:
     if not isinstance(password, str) or not all(isinstance(c, dict) for c in (totp, passwords, recovery)):
         _clear_session()
         return False
+    if data.get("vault_fp") != _vault_fingerprint():
+        # Vault files changed since this ticket was written (other terminal wrote, master
+        # password changed, or a restore replaced them) — the cached data is stale.
+        _clear_session()
+        return False
     _session_password = password
     _totp_cache = totp
     _passwords_cache = passwords
@@ -182,27 +249,46 @@ def _load_session() -> bool:
     return True
 
 
-def has_session() -> bool:
-    """Return True if a non-expired session cache exists on disk without loading it."""
-    try:
-        with open(SESSION_FILE) as f:
-            data = json.load(f)
-    except (OSError, json.JSONDecodeError):
-        return False
-    if not isinstance(data, dict):
-        return False
-    sv = data.get("sv", 1)
-    expires = data.get("expires")
-    return isinstance(sv, int) and sv >= 3 and isinstance(expires, (int, float)) and time.time() < expires
+def has_session(this_terminal_only: bool = False) -> bool:
+    """True if a live (non-expired) ticket exists, without loading it into memory.
+
+    By default checks ANY terminal (global view for `pv status` / `pv lock`);
+    this_terminal_only=True checks just the calling terminal's own ticket (`pv unlock`).
+    """
+    paths = [_session_file()] if this_terminal_only else list(_iter_session_files())
+    for path in paths:
+        try:
+            with open(path) as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        if not isinstance(data, dict):
+            continue
+        sv = data.get("sv", 1)
+        expires = data.get("expires")
+        if isinstance(sv, int) and sv >= 3 and isinstance(expires, (int, float)) and time.time() < expires:
+            return True
+    return False
 
 
 def _clear_session():
+    """Remove this terminal's ticket (leave other terminals' tickets alone)."""
     try:
-        os.unlink(SESSION_FILE)
+        os.unlink(_session_file())
     except FileNotFoundError:
         pass
     except OSError as e:
         print(f"Warning: failed to clear session cache: {e}", file=sys.stderr)
+
+
+def _clear_all_sessions():
+    """Remove every terminal's ticket — used by lock and after vault files are replaced on disk."""
+    _remove_legacy_session()
+    for path in list(_iter_session_files()):
+        try:
+            os.unlink(path)
+        except OSError:
+            pass
 
 
 def read_jkey(path: str) -> dict | None:
@@ -325,7 +411,7 @@ def lock():
     _totp_cache = None
     _passwords_cache = None
     _recovery_cache = None
-    _clear_session()
+    _clear_all_sessions()
 
 
 def set_unlocked(password: str, totp: dict, passwords: dict, recovery: dict) -> None:
