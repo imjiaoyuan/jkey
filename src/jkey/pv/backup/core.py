@@ -13,6 +13,7 @@ Remotes are configured in ~/.config/jkey/remotes.json (mode 600, same dir as the
 import hashlib
 import json
 import os
+import sys
 import tarfile
 import tempfile
 import time
@@ -364,7 +365,12 @@ def _extract(archive: str, out_dir: str) -> None:
                 raise JkeyError(f"snapshot entry escapes restore dir — refusing: {member.name}")
             if member.isdev():
                 raise JkeyError(f"snapshot contains a device file — refusing: {member.name}")
-        tar.extractall(out_dir, filter="data")
+        # `filter` was added in 3.11 and only backported to 3.10.12+; older 3.10.x ignores it.
+        # The manual checks above already cover what filter="data" enforces.
+        if sys.version_info >= (3, 11):
+            tar.extractall(out_dir, filter="data")
+        else:
+            tar.extractall(out_dir)
 
 
 def _confirm_and_write_into_vault(out_dir: str) -> None:
