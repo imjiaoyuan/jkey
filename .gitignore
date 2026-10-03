@@ -12,3 +12,4 @@ htmlcov/
 .coverage
 .code-review-graph/
 .claude/
+jkey-restore-*/
