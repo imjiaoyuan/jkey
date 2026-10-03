@@ -386,6 +386,10 @@ def _confirm_and_write_into_vault(out_dir: str) -> None:
     if response != "y":
         raise JkeyError("Restore cancelled.")
     _write_into_vault(out_dir, files)
+    # Vault files were replaced behind the caches' back: drop every terminal's ticket and
+    # this process's in-memory copies, so the next command re-authenticates and re-decrypts
+    # from the restored files instead of silently writing the stale cache back over them.
+    core.lock()
     print("Vault updated. Run 'jkey pv status' and any command to unlock and verify.")
 
 
@@ -409,8 +413,9 @@ def _write_into_vault(out_dir: str, files: list[str]) -> None:
                 data = open(os.path.join(qr_src, img), "rb").read()
                 dest = os.path.join(core.QR_DIR, img)
                 staged.append((dest, core._stage_write(dest, data)))
-        for dest, tmp in staged:
-            os.replace(tmp, dest)
+        with core._lock_vault():
+            for dest, tmp in staged:
+                os.replace(tmp, dest)
     except OSError as e:
         for _dest, tmp in staged:
             try:
