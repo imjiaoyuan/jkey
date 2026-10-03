@@ -63,6 +63,15 @@ CI (`.github/workflows/ci.yml`) uses `actions/setup-python`: lint on Python 3.13
 - `jkey pv export recovery [-o file.txt]` — Export recovery codes (TXT)
 - `jkey pv export qr -o <dir>` — Export QR code images
 - `jkey pv export all -o <dir>` — Export everything
+- `jkey backup add <name> <url> [--endpoint URL] [--region R] [--access-key K] [--secret-key S] [-k N] [--no-test] [-f]` — Configure a backup remote (`s3://bucket/prefix` or local path); runs a connectivity probe unless `--no-test`
+- `jkey backup ls` — List remotes (credentials masked)
+- `jkey backup rm <name> [-y]` — Remove a remote config
+- `jkey backup cred <name> [--clear]` — Set/clear inline S3 credentials
+- `jkey backup test <name>` — PUT→GET→DELETE connectivity probe
+- `jkey backup run [name] [-k N]` — Back up now (omit name = all remotes)
+- `jkey backup snaps <name>` — List snapshots on a remote
+- `jkey backup restore <name> [-d STAMP] [-o DIR] [--into-vault]` — Restore (safe mode by default; `--into-vault` transactionally overwrites the live vault after confirmation)
+- `jkey backup verify <name> [-d STAMP]` — sha256-check remote snapshots
 
 ### Environment
 - `JKEY_PASS` — Set master password via env var to skip interactive prompt. Export commands still re-verify the password even when `JKEY_PASS` is set.
@@ -131,9 +140,17 @@ src/
         ├── encrypt.py           # Encrypt arbitrary file
         ├── decrypt.py           # Decrypt a .jkey file
         └── export.py            # Data export (re-verifies password)
+    └── backup/
+        ├── core.py              # Backup orchestration: remotes.json, run/snaps/restore/verify, cmd_backup dispatch
+        └── remotes/
+            ├── __init__.py      # open_remote(): scheme → backend dispatch
+            ├── base.py          # Remote ABC + key whitelist (snapshots/manifests/LATEST only)
+            ├── local.py         # Local path / NAS backend (zero deps)
+            └── s3.py            # S3 backend (boto3 lazy import, error→JkeyError mapping)
 tests/
 ├── conftest.py                  # Shared fixtures: vault_dir, vault, mock_getpass
 ├── test_aes.py                  # Encrypt/decrypt roundtrip, v2 compat, tamper resistance
+├── test_backup.py               # Backup: config, parsers, local/S3 backends (fake client), lifecycle roundtrip
 ├── test_cli.py                  # CLI argument parsing and subcommand dispatch
 ├── test_generator.py            # Password generation: charset, length, uniqueness
 ├── test_list_and_export_paths.py # List/export function return value paths
@@ -216,7 +233,14 @@ Data files (`.jkey`) are JSON objects with base64-encoded fields. Version histor
 - **Never bind `pv.core` path constants at import time:** tests monkeypatch `core.CONFIG_DIR`/`TOTP_FILE`/etc. as module attributes *after* import. Modules needing these paths must access them through the module object (`from jkey.pv import core` → `core.TOTP_FILE`), not via `from jkey.pv.core import TOTP_FILE` at module top level — that freezes the pre-patch value. (Functions from `pv.core` are safe to import directly.)
 - **List commands share an output pattern:** the three `ls` core functions use `filter_keys(data, keyword)` (sorted keys, case-insensitive substring filter); `cli.py` handles printing via `_no_match()`.
 - **Export builder pattern:** `pv/export.py` separates `_build_*_content()` (pure data → string) from `_export_*()` (content + file I/O). This lets tests verify output correctness without touching the filesystem. Output formats: TOTP → JSON, passwords → CSV (`name,password`), recovery → plain text (`Account: <name>` blocks), QR → `.jpg` files. New export formats should follow this split. Export re-verification: if `JKEY_PASS` matches the session password, the confirmation prompt is skipped; otherwise a `getpass` prompt is required and a mismatch raises `JkeyError`.
-- **Backup and migration:** back up `~/.config/jkey/` (excluding `.session`) to migrate to another machine.
+- **Backup and migration:** `jkey backup` pushes the encrypted `.jkey` files as timestamped tar.gz snapshots (plus a `.sha256` manifest and a `LATEST` pointer per remote). No master password involved — ciphertext in, ciphertext out; `.session` is never included. See **Backup feature** below.
+- **Backup feature (`pv/backup/`):**
+  - **Ciphertext-only backups:** snapshots are tar.gz archives of the already-encrypted vault files (`totp.jkey`, `passwords.jkey`, `recovery.jkey`, `qr/*.jkey`) — backup/restore never needs the master password and never touches plaintext. `.session` and `.lock` are structurally excluded (not in `_VAULT_FILES`).
+  - **Remote layout:** `<YYYYMMDD-HHMMSS>.tar.gz` snapshot + `<stamp>.sha256` sha256 manifest + `LATEST` pointer, all under an optional prefix. Retention: `-k/--keep` override, else the remote's configured `keep`, else default 5; pruning deletes oldest snapshot+manifest pairs beyond the limit.
+  - **Remotes config:** `remotes.json` in `CONFIG_DIR` (mode 600, via `core.write_secure_text`), computed through `_remotes_file()` — never bind the path at import time (same monkeypatch rule as `pv.core`). Inline `access_key`/`secret_key` for S3 remotes; absent → boto3 default chain. `ls` output always masks both (`_redacted()`), errors mask AKID-shaped tokens (`s3._wrap_s3_error`).
+  - **Backends:** `Remote` ABC (`put/get/list_keys/delete/probe`). `LocalRemote` (`file://` or bare path, zero deps); `S3Remote` (boto3 lazy-imported — missing boto3 raises `JkeyError("... pip install jkey[s3]")`). Scheme dispatch via `remotes.open_remote(cfg)`. `probe()` is a full PUT→GET(read-back)→DELETE roundtrip with a manifest-style key, so read-only IAM policies fail loudly.
+  - **Safety rails:** `restore` without `--into-vault` only unpacks to `-o DIR` (default `./jkey-restore-<stamp>`); `--into-vault` confirms (`input()`), stages via `core.write_jkey`, and is transactional. Archive members are validated against the restore dir (`escapes restore dir` rejection); `-d` stamps must pass `valid_snapshot()` (no path traversal). `verify` checks remote bytes against the `.sha256` manifest.
+  - **Tests:** S3 backend tested with an in-memory `FakeS3Client` injected as `r._client`; `_stamp()` monkeypatched for deterministic snapshot names.
 - **`__init__.py` is intentionally empty:** the package exposes no public library API — it is purely a CLI tool. All functionality is accessed through `jkey` subcommands.
 - **Test isolation via monkeypatching:** use `conftest.py` fixtures (`vault_dir`, `vault`) rather than touching real `~/.config/jkey`. Tests that need to bypass password prompts set `JKEY_PASS` in the environment.
 
