@@ -250,7 +250,11 @@ def _cmd_cred(args) -> None:
 def urlparse_scheme(url: str) -> str:
     from urllib.parse import urlparse
 
-    return urlparse(url).scheme.lower()
+    scheme = urlparse(url).scheme.lower()
+    # Windows drive letters ("C:\..." or "C:/...") parse as a single-letter scheme — a local path.
+    if len(scheme) == 1 and len(url) > 2 and url[1] == ":" and url[2] in ("\\", "/"):
+        return ""
+    return scheme
 
 
 def _cmd_run(args) -> None:

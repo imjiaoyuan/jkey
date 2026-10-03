@@ -14,6 +14,9 @@ def open_remote(cfg: dict) -> Remote:
     """Build a Remote from a remotes.json entry: {'url': ..., 'endpoint': ..., ...}."""
     url = cfg.get("url", "")
     scheme = urlparse(url).scheme.lower()
+    # Windows drive letters ("C:\..." or "C:/...") parse as a scheme — still a local path.
+    if len(scheme) == 1 and len(url) > 2 and url[1] == ":" and url[2] in ("\\", "/"):
+        scheme = ""
 
     if scheme == "s3":
         from jkey.pv.backup.remotes.s3 import S3Remote
