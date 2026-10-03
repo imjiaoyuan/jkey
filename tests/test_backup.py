@@ -267,6 +267,19 @@ class TestRemotesCmd:
         with pytest.raises(JkeyError, match="Cancelled"):
             bc._cmd_cred(_args(name="aws"))
 
+    def test_cred_eof_cancels_not_traceback(self, vault_dir, monkeypatch):
+        """Regression: Ctrl-D at the access-key prompt must raise JkeyError, not EOFError."""
+        import jkey.pv.backup.core as bc
+
+        bc.save_remotes({"aws": {"url": "s3://bkt"}})
+
+        def eof(*_a):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", eof)
+        with pytest.raises(JkeyError, match="Cancelled"):
+            bc._cmd_cred(_args(name="aws"))
+
     def test_cred_non_s3_rejected(self, vault_dir, backup_dir):
         import jkey.pv.backup.core as bc
 

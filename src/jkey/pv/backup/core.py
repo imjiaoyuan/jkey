@@ -227,7 +227,11 @@ def _cmd_cred(args) -> None:
         print(f"Cleared inline credentials for '{args.name}' (will use AWS default chain).")
         return
     if urlparse_scheme(cfg["url"]) == "s3":
-        access = args.access_key or input("Access key (empty to cancel): ").strip()
+        try:
+            access = args.access_key or input("Access key (empty to cancel): ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            raise JkeyError("Cancelled.")
         if not access:
             raise JkeyError("Cancelled.")
         secret = args.secret_key or core.prompt_password("Secret key: ")
