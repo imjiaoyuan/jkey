@@ -71,9 +71,14 @@ class TestConfig:
         assert bc.load_remotes() == {"nas": {"url": "/tmp/x"}}
 
     def test_remotes_file_permissions(self, vault_dir):
+        import sys
+
         import jkey.pv.backup.core as bc
 
         bc.save_remotes({})
+        # Windows only honors the read-only bit, not the full mode — POSIX-only check.
+        if sys.platform == "win32":
+            pytest.skip("chmod 0o600 has no effect on Windows")
         assert (os.stat(bc._remotes_file()).st_mode & 0o777) == 0o600
 
     def test_get_remote_unknown_raises(self, vault_dir):
