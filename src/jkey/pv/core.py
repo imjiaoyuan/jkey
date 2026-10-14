@@ -214,7 +214,7 @@ def _load_session() -> bool:
     global _session_password, _totp_cache, _passwords_cache, _recovery_cache
     path = _session_file()
     try:
-        with open(path) as f:
+        with open(path, encoding="utf-8") as f:
             data = json.load(f)
     except (OSError, json.JSONDecodeError):
         return False
@@ -258,7 +258,7 @@ def has_session(this_terminal_only: bool = False) -> bool:
     paths = [_session_file()] if this_terminal_only else list(_iter_session_files())
     for path in paths:
         try:
-            with open(path) as f:
+            with open(path, encoding="utf-8") as f:
                 data = json.load(f)
         except (OSError, json.JSONDecodeError):
             continue
@@ -296,7 +296,7 @@ def read_jkey(path: str) -> dict | None:
         return None
     with _lock_vault(shared=True):
         try:
-            with open(path, "r") as f:
+            with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
         except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
             raise JkeyError(f"cannot read vault file {path}: {e}") from e
