@@ -343,6 +343,43 @@ class TestProbe:
         LocalRemote(backup_dir).probe()
         assert os.listdir(backup_dir) == []
 
+    def test_local_size(self, vault_dir, tmp_path):
+        from jkey.pv.backup.remotes.local import LocalRemote
+
+        r = LocalRemote(str(tmp_path))
+        src = tmp_path / "a.txt"
+        src.write_bytes(b"hello")
+        r.put(str(src), "20250101-000000.tar.gz")
+        assert r.size("20250101-000000.tar.gz") == 5
+        assert r.size("20990101-000000.tar.gz") is None
+
+
+class TestTransferProgress:
+    def test_large_file_draws_and_finishes_on_one_line(self, capsys, monkeypatch):
+        import sys as _sys
+
+        monkeypatch.setattr(_sys.stdout, "isatty", lambda: True)
+        from jkey.pv.backup.core import _TransferProgress
+
+        p = _TransferProgress("Uploading x.tar.gz")
+        p.set_total(2 << 20)
+        p(1 << 20)
+        p(2 << 20)
+        p.finish()
+        out = capsys.readouterr().out
+        assert out.startswith("\rUploading x.tar.gz:")
+        assert "100%" in out
+        assert out.rstrip().endswith("2097152 bytes")
+
+    def test_non_tty_is_silent(self, capsys):
+        from jkey.pv.backup.core import _TransferProgress
+
+        p = _TransferProgress("Uploading x.tar.gz")
+        p.set_total(10 << 20)
+        p(5 << 20)
+        p.finish()
+        assert capsys.readouterr().out == ""
+
     def test_local_probe_unwritable(self, vault_dir, tmp_path):
         from jkey.pv.backup.remotes.local import LocalRemote
 
@@ -382,15 +419,25 @@ class FakeS3Client:
     def upload_fileobj(self, fobj, bucket, key):
         self.objects[key] = fobj.read()
 
-    def upload_file(self, path, bucket, key):
+    def upload_file(self, path, bucket, key, **kwargs):
         with open(path, "rb") as f:
-            self.objects[key] = f.read()
+            data = f.read()
+        self.objects[key] = data
+        if kwargs.get("Callback"):
+            kwargs["Callback"](len(data))
 
-    def download_file(self, bucket, key, path):
+    def download_file(self, bucket, key, path, **kwargs):
         if key not in self.objects:
             raise self._not_found()
         with open(path, "wb") as f:
             f.write(self.objects[key])
+        if kwargs.get("Callback"):
+            kwargs["Callback"](len(self.objects[key]))
+
+    def head_object(self, Bucket, Key):
+        if Key not in self.objects:
+            raise self._not_found()
+        return {"ContentLength": len(self.objects[Key])}
 
     def get_object(self, Bucket, Key):
         if Key not in self.objects:
@@ -434,8 +481,21 @@ class TestS3WithFakeClient:
         dest = tmp_path / "b.txt"
         r.get("20250101-000000.tar.gz", str(dest))
         assert dest.read_bytes() == b"hello"
+        assert r.size("20250101-000000.tar.gz") == 5
         r.delete("20250101-000000.tar.gz")
         assert fake.objects == {}
+
+    def test_size_missing_is_none(self, s3_remote):
+        r, _ = s3_remote
+        assert r.size("20990101-000000.tar.gz") is None
+
+    def test_put_reports_progress(self, s3_remote, tmp_path):
+        r, _ = s3_remote
+        src = tmp_path / "a.txt"
+        src.write_bytes(b"hello")
+        seen = []
+        r.put(str(src), "20250101-000000.tar.gz", progress=seen.append)
+        assert seen == [5]
 
     def test_get_missing_raises(self, s3_remote, tmp_path):
         r, _ = s3_remote

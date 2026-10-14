@@ -315,6 +315,44 @@ def urlparse_scheme(url: str) -> str:
     return scheme
 
 
+class _TransferProgress:
+    """One-line transfer progress on the current terminal line.
+
+    The total is provided by the caller (set_total); callbacks report bytes done.
+    Silent when stdout is not a tty (pipes, cron).
+    """
+
+    def __init__(self, label: str):
+        self.label = label
+        self.total = None
+        self.enabled = False
+        self.last_len = 0
+
+    def set_total(self, total: int | None) -> None:
+        self.total = total
+        self.enabled = total is not None and sys.stdout.isatty()
+
+    def __call__(self, done: int) -> None:
+        if not self.enabled:
+            return
+        pct = min(100, done * 100 // self.total)
+        line = f"\r{self.label}: {pct:3d}% ({done}/{self.total} bytes)"
+        pad = max(0, self.last_len - len(line))
+        sys.stdout.write(line + " " * pad)
+        sys.stdout.flush()
+        self.last_len = len(line) + pad
+
+    def finish(self) -> None:
+        if self.enabled:
+            sys.stdout.write(f"\r{self.label}: {self.total} bytes" + " " * max(0, self.last_len - 20) + "\n")
+            sys.stdout.flush()
+
+    def abort(self) -> None:
+        if self.enabled:
+            sys.stdout.write("\n")
+            sys.stdout.flush()
+
+
 def _cmd_run(args) -> None:
     remotes = load_remotes()
     if args.name:
@@ -335,7 +373,15 @@ def _cmd_run(args) -> None:
             digest = _sha256(archive)
             with open(os.path.join(tmpdir, f"{stamp}.sha256"), "w") as f:
                 f.write(f"{digest}  {stamp}.tar.gz\n")
-            remote.put(archive, f"{stamp}.tar.gz")
+            size = os.path.getsize(archive)
+            progress = _TransferProgress(f"Uploading {stamp}.tar.gz")
+            progress.set_total(size)
+            try:
+                remote.put(archive, f"{stamp}.tar.gz", progress=progress)
+            except BaseException:
+                progress.abort()
+                raise
+            progress.finish()
             remote.put(os.path.join(tmpdir, f"{stamp}.sha256"), f"{stamp}.sha256")
             remote.put(_write_latest(tmpdir, stamp), _LATEST)
         keep = args.keep if args.keep is not None else cfg.get("keep", 5)
@@ -393,7 +439,14 @@ def _cmd_restore(args) -> None:
     try:
         archive = os.path.join(tmpdir, snapshot)
         manifest = os.path.join(tmpdir, f"{snapshot_stamp(snapshot)}.sha256")
-        remote.get(snapshot, archive)
+        progress = _TransferProgress(f"Downloading {snapshot}")
+        progress.set_total(remote.size(snapshot))
+        try:
+            remote.get(snapshot, archive, progress=progress)
+        except BaseException:
+            progress.abort()
+            raise
+        progress.finish()
         try:
             remote.get(f"{snapshot_stamp(snapshot)}.sha256", manifest)
         except JkeyError:
@@ -512,7 +565,14 @@ def _cmd_verify(args) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             archive = os.path.join(tmpdir, snapshot)
             manifest = os.path.join(tmpdir, f"{snapshot_stamp(snapshot)}.sha256")
-            remote.get(snapshot, archive)
+            progress = _TransferProgress(f"Downloading {snapshot}")
+            progress.set_total(remote.size(snapshot))
+            try:
+                remote.get(snapshot, archive, progress=progress)
+            except BaseException:
+                progress.abort()
+                raise
+            progress.finish()
             remote.get(f"{snapshot_stamp(snapshot)}.sha256", manifest)
             _verify_archive(archive, manifest, snapshot)
         print(f"OK: {snapshot}")
