@@ -25,7 +25,7 @@ class LocalRemote(Remote):
             safe = safe.replace(ch, "_")
         return os.path.join(self.root, safe)
 
-    def put(self, local_path: str, key: str) -> None:
+    def put(self, local_path: str, key: str, progress=None) -> None:
         dest = self._path(key)
         try:
             os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
@@ -33,16 +33,20 @@ class LocalRemote(Remote):
             os.chmod(dest, 0o600)
         except OSError as e:
             raise JkeyError(f"backup write failed ({self.url}/{key}): {e}") from e
+        if progress:
+            progress(os.path.getsize(dest))
 
-    def get(self, key: str, dest_path: str) -> None:
+    def get(self, key: str, dest_path: str, progress=None) -> None:
         src = self._path(key)
         try:
             with open(src, "rb") as fsrc, open(dest_path, "wb") as fdst:
-                fdst.write(fsrc.read())
+                shutil.copyfileobj(fsrc, fdst)
         except FileNotFoundError as e:
             raise JkeyError(f"snapshot not found on remote: {key}") from e
         except OSError as e:
             raise JkeyError(f"backup read failed ({self.url}/{key}): {e}") from e
+        if progress:
+            progress(os.path.getsize(dest_path))
 
     def list_keys(self) -> list[str]:
         if not os.path.isdir(self.root):
@@ -59,6 +63,12 @@ class LocalRemote(Remote):
             return
         except OSError as e:
             raise JkeyError(f"cannot delete {self.url}/{key}: {e}") from e
+
+    def size(self, key: str) -> int | None:
+        try:
+            return os.path.getsize(self._path(key))
+        except OSError:
+            return None
 
     def probe(self) -> None:
         """Write, read back, verify, delete a probe file — proves the target is usable."""

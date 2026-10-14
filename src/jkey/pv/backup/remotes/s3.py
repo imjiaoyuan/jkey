@@ -82,15 +82,15 @@ class S3Remote(Remote):
             raise JkeyError(f"Refusing to touch unexpected remote object: {name!r}")
         return f"{self.prefix}/{name}" if self.prefix else name
 
-    def put(self, local_path: str, key: str) -> None:
+    def put(self, local_path: str, key: str, progress=None) -> None:
         try:
-            self._s3().upload_file(local_path, self.bucket, self._key(key))
+            self._s3().upload_file(local_path, self.bucket, self._key(key), Callback=progress)
         except Exception as e:
             raise _wrap_s3_error("upload", self.url, e) from e
 
-    def get(self, key: str, dest_path: str) -> None:
+    def get(self, key: str, dest_path: str, progress=None) -> None:
         try:
-            self._s3().download_file(self.bucket, self._key(key), dest_path)
+            self._s3().download_file(self.bucket, self._key(key), dest_path, Callback=progress)
         except Exception as e:
             raise _wrap_s3_error("download", self.url, e) from e
 
@@ -106,6 +106,13 @@ class S3Remote(Remote):
             if "/" not in name:  # ignore objects nested deeper than the root
                 names.append(name)
         return sorted(names)
+
+    def size(self, key: str) -> int | None:
+        try:
+            resp = self._s3().head_object(Bucket=self.bucket, Key=self._key(key))
+            return resp["ContentLength"]
+        except Exception:
+            return None
 
     def delete(self, key: str) -> None:
         try:

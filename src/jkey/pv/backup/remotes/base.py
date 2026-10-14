@@ -39,12 +39,12 @@ class Remote(ABC):
         self.region = region
 
     @abstractmethod
-    def put(self, local_path: str, key: str) -> None:
-        """Upload local file as key."""
+    def put(self, local_path: str, key: str, progress=None) -> None:
+        """Upload local file as key. progress(bytes_done) is called during transfer."""
 
     @abstractmethod
-    def get(self, key: str, dest_path: str) -> None:
-        """Download key to dest_path."""
+    def get(self, key: str, dest_path: str, progress=None) -> None:
+        """Download key to dest_path. progress(bytes_done) is called during transfer."""
 
     @abstractmethod
     def list_keys(self) -> list[str]:
@@ -53,6 +53,10 @@ class Remote(ABC):
     @abstractmethod
     def delete(self, key: str) -> None:
         """Delete key."""
+
+    @abstractmethod
+    def size(self, key: str) -> int | None:
+        """Object size in bytes, or None if it cannot be determined cheaply."""
 
     @abstractmethod
     def probe(self) -> None:
