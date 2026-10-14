@@ -9,6 +9,9 @@ on:
 jobs:
   build-n-publish:
     runs-on: ubuntu-latest
+    concurrency:
+      group: pypi-publish
+      cancel-in-progress: false
     environment: pypi
     permissions:
       id-token: write
