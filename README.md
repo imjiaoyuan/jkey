@@ -77,7 +77,8 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey pv export recovery` | Export recovery codes |
 | `jkey pv export qr -o <dir>` | Export QR code images |
 | `jkey pv export all -o <dir>` | Export everything |
-| `jkey backup add <name> <url>` | Configure a backup remote (`s3://bucket/prefix` or local path) |
+| `jkey backup init` | Create `remotes.json` from a commented template (prints the path if it already exists) |
+| `jkey backup add <name> <url>` | Configure a backup remote (`s3://bucket/prefix` or local path; S3 url must include the bucket) |
 | `jkey backup ls` | List backup remotes (credentials masked) |
 | `jkey backup rm <name>` | Remove a backup remote |
 | `jkey backup cred <name>` | Set or clear inline S3 credentials |
@@ -97,6 +98,14 @@ Backups copy the **already-encrypted** vault files (`.jkey`) to a remote as time
 
 ```bash
 pip install "jkey[s3]"   # S3 support (local-path remotes need no extra dependency)
+
+# Create the config, then edit the file yourself: rename a key, fill url/keys, save.
+# The template documents every field; entries whose url is still empty are placeholders jkey skips.
+jkey backup init
+vi ~/.config/jkey/remotes.json   # Windows: %APPDATA%/jkey/remotes.json
+
+# S3 bucket note: the bucket must already exist (create it in the provider console first);
+# jkey never creates buckets — url = s3://<bucket>/<prefix>
 
 # AWS S3 — credentials come from the standard AWS chain (~/.aws, env vars, IAM role)
 jkey backup add aws s3://my-bucket/jkey --region ap-east-1

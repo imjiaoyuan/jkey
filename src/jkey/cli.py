@@ -98,6 +98,8 @@ def _build_parser():
 
     p = sub.add_parser("backup", help="Back up vault to S3 or a local path")
     p2 = p.add_subparsers(dest="baction")
+    a = p2.add_parser("init", help="Create the backup config with a template (no-op if it already exists)")
+    a.add_argument("--no-editor", action="store_true", help="Accepted for compatibility; init never opens an editor")
     a = p2.add_parser("add", help="Configure a backup remote")
     a.add_argument("name")
     a.add_argument("url", help="s3://bucket/prefix or a local path")
@@ -263,6 +265,6 @@ def _pv(args):
 def _backup(args):
     routes = {
         action: ("jkey.pv.backup.core", "cmd_backup", lambda a: (a,))
-        for action in ("add", "ls", "rm", "cred", "test", "run", "snaps", "restore", "verify")
+        for action in ("add", "init", "ls", "rm", "cred", "test", "run", "snaps", "restore", "verify")
     }
     _route(args, "backup", routes)
