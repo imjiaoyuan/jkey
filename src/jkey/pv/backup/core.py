@@ -40,7 +40,7 @@ _VAULT_FILES = ("totp.jkey", "passwords.jkey", "recovery.jkey")
 
 def load_remotes() -> dict:
     try:
-        with open(_remotes_file()) as f:
+        with open(_remotes_file(), encoding="utf-8") as f:
             data = json.loads("".join(line for line in f if not line.lstrip().startswith("#")))
         return data if isinstance(data, dict) else {}
     except FileNotFoundError:
@@ -140,7 +140,7 @@ def _latest_stamp(remote) -> str | None:
     try:
         with contextlib.suppress(Exception):
             remote.get(_LATEST, tmp.name)
-            with open(tmp.name) as f:
+            with open(tmp.name, encoding="ascii") as f:
                 name = f.read().strip()
             if valid_snapshot(name) and name in _snapshot_names(remote):
                 return snapshot_stamp(name)
@@ -371,7 +371,7 @@ def _cmd_run(args) -> None:
         with tempfile.TemporaryDirectory() as tmpdir:
             archive = _build_snapshot(pairs, os.path.join(tmpdir, f"{stamp}.tar.gz"))
             digest = _sha256(archive)
-            with open(os.path.join(tmpdir, f"{stamp}.sha256"), "w") as f:
+            with open(os.path.join(tmpdir, f"{stamp}.sha256"), "w", encoding="ascii") as f:
                 f.write(f"{digest}  {stamp}.tar.gz\n")
             size = os.path.getsize(archive)
             progress = _TransferProgress(f"Uploading {stamp}.tar.gz")
@@ -394,7 +394,7 @@ def _cmd_run(args) -> None:
 
 def _write_latest(tmpdir: str, stamp: str) -> str:
     p = os.path.join(tmpdir, "LATEST")
-    with open(p, "w") as f:
+    with open(p, "w", encoding="ascii") as f:
         f.write(f"{stamp}.tar.gz\n")
     return p
 
@@ -413,7 +413,7 @@ def _cmd_snaps(args) -> None:
 def _verify_archive(archive: str, manifest_path: str, snapshot: str) -> None:
     expected = ""
     try:
-        with open(manifest_path) as f:
+        with open(manifest_path, encoding="ascii") as f:
             expected = f.read().split()[0]
     except (OSError, IndexError):
         raise JkeyError(f"corrupt or missing manifest for {snapshot}")
