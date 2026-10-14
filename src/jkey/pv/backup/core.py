@@ -16,7 +16,9 @@ import os
 import sys
 import tarfile
 import tempfile
+import textwrap
 import time
+from urllib.parse import urlparse
 
 from jkey.errors import JkeyError
 from jkey.pv import core
@@ -39,7 +41,7 @@ _VAULT_FILES = ("totp.jkey", "passwords.jkey", "recovery.jkey")
 def load_remotes() -> dict:
     try:
         with open(_remotes_file()) as f:
-            data = json.load(f)
+            data = json.loads("".join(line for line in f if not line.lstrip().startswith("#")))
         return data if isinstance(data, dict) else {}
     except FileNotFoundError:
         return {}
@@ -48,13 +50,30 @@ def load_remotes() -> dict:
 
 
 def save_remotes(remotes: dict) -> None:
-    core.write_secure_text(_remotes_file(), json.dumps(remotes, indent=4, ensure_ascii=False) + "\n", atomic=True)
+    text = (
+        textwrap.dedent(
+            """\
+        # jkey backup remotes. Edit with: jkey backup init
+        # One JSON object per remote. Fill url (s3://bucket/prefix or a local path),
+        # rename the key to your remote's name, then delete its _comment.
+        # Entries whose url is still empty are template placeholders — jkey ignores them.
+        # endpoint/region: for S3-compatible providers (OSS, COS, MinIO, R2, B2); omit for AWS.
+        # access_key/secret_key: leave both out to use the AWS default chain (~/.aws, env, IAM role).
+        # keep: snapshots to retain on that remote (default 5).
+        """
+        )
+        + json.dumps(remotes, indent=4, ensure_ascii=False)
+        + "\n"
+    )
+    core.write_secure_text(_remotes_file(), text, atomic=True)
 
 
 def _get_remote(name: str, remotes: dict | None = None) -> dict:
     cfg = (remotes if remotes is not None else load_remotes()).get(name)
     if cfg is None:
-        raise JkeyError(f"Backup remote '{name}' not configured. Add it with 'jkey backup add'.")
+        raise JkeyError(f"Backup remote '{name}' not configured. Run 'jkey backup init' to edit the config.")
+    if not cfg.get("url"):
+        raise JkeyError(f"Backup remote '{name}' is a template entry: fill in 'url' with 'jkey backup init'.")
     return cfg
 
 
@@ -169,6 +188,11 @@ def _cmd_add(args) -> None:
         if not cfg["secret_key"]:
             raise JkeyError("Secret key cannot be empty.")
     remotes[name] = cfg
+    if urlparse_scheme(args.url) == "s3" and not urlparse(args.url).netloc.strip():
+        raise JkeyError(
+            f"Remote '{name}' has no bucket in its url — use s3://<bucket>/<prefix>. "
+            "jkey does not create buckets; create it in the provider console first."
+        )
     save_remotes(remotes)
     print(f"Added backup remote '{name}': {args.url}")
 
@@ -193,7 +217,7 @@ def _cmd_test(args) -> None:
 def _cmd_ls(args) -> None:
     remotes = load_remotes()
     if not remotes:
-        print("No backup remotes configured. Add one with 'jkey backup add'.")
+        print(f"No backup remotes configured. Run 'jkey backup init' to create {_remotes_file()}.")
         return
     for name in sorted(remotes):
         cfg = remotes[name]
@@ -204,6 +228,11 @@ def _cmd_rm(args) -> None:
     remotes = load_remotes()
     if args.name not in remotes:
         raise JkeyError(f"Backup remote '{args.name}' not configured.")
+    if not remotes[args.name].get("url"):
+        del remotes[args.name]
+        save_remotes(remotes)
+        print(f"Removed template entry '{args.name}'.")
+        return
     if not args.yes:
         try:
             response = input(f"Remove backup remote '{args.name}'? (y/N): ").strip().lower()
@@ -247,9 +276,38 @@ def _cmd_cred(args) -> None:
     print(f"Credentials updated for '{args.name}'.")
 
 
-def urlparse_scheme(url: str) -> str:
-    from urllib.parse import urlparse
+_INIT_TEMPLATE = {
+    "example-s3": {
+        "_comment": (
+            "S3-compatible example. url = s3://<bucket>/<prefix> — the bucket must already exist "
+            "(jkey does not create buckets; create it in the provider console first). "
+            "endpoint/region for non-AWS providers, access_key + secret_key leave empty for the "
+            "AWS default chain, then delete this _comment."
+        ),
+        "url": "",
+        "endpoint": "",
+        "region": "",
+        "access_key": "",
+        "secret_key": "",
+        "keep": 5,
+    },
+    "example-local": {
+        "_comment": "Local path example (NAS mount, USB drive). Rename the key, fill url, then delete this _comment.",
+        "url": "",
+    },
+}
 
+
+def _cmd_init(args) -> None:
+    """Create the config with a template on first use; with a config present, just point at it."""
+    if load_remotes():
+        print(f"Backup config already exists: {_remotes_file()}")
+        return
+    save_remotes(_INIT_TEMPLATE)
+    print(f"Template written to {_remotes_file()}. Edit it to configure a remote, then run 'jkey backup ls'.")
+
+
+def urlparse_scheme(url: str) -> str:
     scheme = urlparse(url).scheme.lower()
     # Windows drive letters ("C:\..." or "C:/...") parse as a single-letter scheme — a local path.
     if len(scheme) == 1 and len(url) > 2 and url[1] == ":" and url[2] in ("\\", "/"):
@@ -259,12 +317,13 @@ def urlparse_scheme(url: str) -> str:
 
 def _cmd_run(args) -> None:
     remotes = load_remotes()
-    if not remotes:
-        raise JkeyError("No backup remotes configured. Add one with 'jkey backup add'.")
-    names = [args.name] if args.name else sorted(remotes)
-    for name in names:
-        if name not in remotes:
-            raise JkeyError(f"Backup remote '{name}' not configured. Add it with 'jkey backup add'.")
+    if args.name:
+        _get_remote(args.name, remotes)
+        names = [args.name]
+    else:
+        names = [n for n in sorted(remotes) if remotes[n].get("url")]
+        if not names:
+            raise JkeyError("No backup remote configured yet. Run 'jkey backup init' and fill in an entry's url.")
 
     pairs = _collect_vault_files()
     stamp = _stamp()
@@ -466,6 +525,8 @@ def cmd_backup(args):
     action = args.baction
     if action == "add":
         _cmd_add(args)
+    elif action == "init":
+        _cmd_init(args)
     elif action == "ls":
         _cmd_ls(args)
     elif action == "rm":

@@ -1,6 +1,7 @@
 import io
 import json
 import os
+import sys
 
 import pytest
 
@@ -43,6 +44,7 @@ def _args(**kw):
         "date": None,
         "output": None,
         "into_vault": False,
+        "no_editor": False,
     }
     base.update(kw)
     return type("Args", (), base)()
@@ -71,7 +73,6 @@ class TestConfig:
         assert bc.load_remotes() == {"nas": {"url": "/tmp/x"}}
 
     def test_remotes_file_permissions(self, vault_dir):
-        import sys
 
         import jkey.pv.backup.core as bc
 
@@ -100,6 +101,32 @@ class TestConfig:
         flat = json.dumps(red)
         assert "AKIAIOSFODNN7EXAMPLE" not in flat and "supersecret" not in flat
         assert red["access_key"].endswith("MPLE") and red["secret_key"].endswith("cret")
+
+
+class TestBackupInit:
+    def test_first_run_writes_template(self, vault_dir, capsys):
+        import jkey.pv.backup.core as bc
+
+        bc._cmd_init(_args())
+        assert bc.load_remotes() == bc._INIT_TEMPLATE
+        assert "Template written" in capsys.readouterr().out
+
+    def test_existing_config_is_info(self, vault_dir, capsys):
+        import jkey.pv.backup.core as bc
+
+        bc.save_remotes({"nas": {"url": "/tmp/x"}})
+        bc._cmd_init(_args(no_editor=True))
+        assert "already exists" in capsys.readouterr().out
+        assert bc.load_remotes() == {"nas": {"url": "/tmp/x"}}
+
+    def test_saved_config_carries_comment_header(self, vault_dir):
+        import jkey.pv.backup.core as bc
+
+        bc.save_remotes({"nas": {"url": "/tmp/x"}})
+        with open(bc._remotes_file(), encoding="utf-8") as f:
+            text = f.read()
+        assert text.startswith("#") and "jkey backup init" in text
+        assert bc.load_remotes() == {"nas": {"url": "/tmp/x"}}
 
 
 class TestParser:
@@ -141,6 +168,10 @@ class TestParser:
         p = self._parser()
         assert p.parse_args(["backup", "run"]).name is None
         assert p.parse_args(["backup", "run", "aws", "-k", "1"]).name == "aws"
+
+    def test_init_accepts_no_editor_flag(self):
+        args = self._parser().parse_args(["backup", "init", "--no-editor"])
+        assert args.no_editor is True
 
     def test_restore_defaults(self):
         args = self._parser().parse_args(["backup", "restore", "aws"])
@@ -194,7 +225,6 @@ class TestRemotesCmd:
             bc._cmd_add(_args(name="aws", url="s3://bkt", access_key="AK"))
 
     def test_add_s3_probe_failure_does_not_remove_config(self, vault_dir, monkeypatch):
-        import sys
 
         import jkey.pv.backup.core as bc
 
@@ -580,7 +610,7 @@ class TestLifecycle:
         import jkey.pv.backup.core as bc
 
         _fake_vault(vault)
-        with pytest.raises(JkeyError, match="No backup remotes"):
+        with pytest.raises(JkeyError, match="No backup remote configured"):
             bc._cmd_run(_args())
 
     def test_session_never_backed_up(self, vault, backup_dir):
