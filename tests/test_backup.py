@@ -137,7 +137,7 @@ class TestParser:
 
     def test_add_minimal(self):
         args = self._parser().parse_args(["backup", "add", "nas", "/mnt/nas"])
-        assert (args.command, args.baction, args.name, args.url) == ("backup", "add", "nas", "/mnt/nas")
+        assert (args.command, args.action, args.name, args.url) == ("backup", "add", "nas", "/mnt/nas")
         assert args.no_test is False and args.force is False
 
     def test_add_s3_full(self):

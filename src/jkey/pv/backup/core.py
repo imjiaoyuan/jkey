@@ -522,7 +522,7 @@ def _cmd_verify(args) -> None:
 
 
 def cmd_backup(args):
-    action = args.baction
+    action = args.action
     if action == "add":
         _cmd_add(args)
     elif action == "init":

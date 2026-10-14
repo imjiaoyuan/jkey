@@ -97,7 +97,7 @@ def _build_parser():
     x.add_argument("-o", "--output")
 
     p = sub.add_parser("backup", help="Back up vault to S3 or a local path")
-    p2 = p.add_subparsers(dest="baction")
+    p2 = p.add_subparsers(dest="action")
     a = p2.add_parser("init", help="Create the backup config with a template (no-op if it already exists)")
     a.add_argument("--no-editor", action="store_true", help="Accepted for compatibility; init never opens an editor")
     a = p2.add_parser("add", help="Configure a backup remote")
