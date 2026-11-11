@@ -96,13 +96,22 @@ def _build_parser():
     x.add_argument("type", choices=["totp", "passwords", "recovery", "qr", "all"])
     x.add_argument("-o", "--output")
 
-    p = sub.add_parser("backup", help="Back up vault to S3 or a local path")
+    p = sub.add_parser("backup", help="Upload the encrypted vault to a configured backend")
+    p.add_argument("name", help="Backend alias or rclone:<remote>[:path]")
+    p.add_argument("-k", "--keep", type=int, help="Snapshots to retain")
+    p.set_defaults(action="run")
+    p = sub.add_parser("restore", help="Restore the latest backup; keep conflicting local files as .bak")
+    p.add_argument("name", help="Backend alias or rclone:<remote>[:path]")
+    p.add_argument("-d", "--date", help="Restore a specific snapshot ID")
+    p.add_argument("-o", "--output", help="Restore into a different directory")
+    p.set_defaults(action="restore")
+    p = sub.add_parser("remote", help="Configure storage backends")
     p2 = p.add_subparsers(dest="action")
     a = p2.add_parser("init", help="Create the backup config with a template (no-op if it already exists)")
     a.add_argument("--no-editor", action="store_true", help="Accepted for compatibility; init never opens an editor")
     a = p2.add_parser("add", help="Configure a backup remote")
     a.add_argument("name")
-    a.add_argument("url", help="s3://bucket/prefix or a local path")
+    a.add_argument("url", help="s3://bucket/prefix, a local path, or rclone:<remote>[:path]")
     a.add_argument("--endpoint", help="S3-compatible endpoint (OSS, COS, MinIO, R2, B2)")
     a.add_argument("--region", help="S3 region")
     a.add_argument("--access-key", help="Access key (stored in remotes.json; omit to use AWS default chain)")
@@ -121,19 +130,12 @@ def _build_parser():
     a.add_argument("--clear", action="store_true", help="Clear inline credentials (use AWS default chain)")
     a = p2.add_parser("test", help="Test remote connectivity (write, read back, delete)")
     a.add_argument("name")
-    a = p2.add_parser("run", help="Run a backup now")
-    a.add_argument("name", nargs="?", default=None, help="Remote name (omit = all remotes)")
-    a.add_argument("-k", "--keep", type=int, help="Snapshots to keep (overrides remote config)")
     a = p2.add_parser("snaps", help="List snapshots on a remote")
     a.add_argument("name")
-    a = p2.add_parser("restore", help="Restore a snapshot")
-    a.add_argument("name")
-    a.add_argument("-d", "--date", help="Snapshot stamp YYYYMMDD-HHMMSS (default: latest)")
-    a.add_argument("-o", "--output", help="Restore directory (default: ./jkey-restore-<stamp>)")
-    a.add_argument("--into-vault", action="store_true", help="Overwrite the live vault after confirmation")
     a = p2.add_parser("verify", help="Verify snapshot checksums on a remote")
     a.add_argument("name")
-    a.add_argument("-d", "--date", help="Snapshot stamp YYYYMMDD-HHMMSS (default: all)")
+    a.add_argument("-d", "--date", help="Snapshot ID from remote snaps (default: all)")
+    a.add_argument("--decrypt", action="store_true", help="Also test decryption of every vault file and QR image")
 
     return parser
 
@@ -171,7 +173,7 @@ def main():
             _pm(args)
         elif args.command == "pv":
             _pv(args)
-        elif args.command == "backup":
+        elif args.command in ("backup", "restore", "remote"):
             _backup(args)
     except JkeyError as e:
         print(f"Error: {e}", file=sys.stderr)
@@ -263,8 +265,10 @@ def _pv(args):
 
 
 def _backup(args):
+    if args.command in ("backup", "restore"):
+        return _call("jkey.pv.backup.core", "cmd_backup", args)
     routes = {
         action: ("jkey.pv.backup.core", "cmd_backup", lambda a: (a,))
-        for action in ("add", "init", "ls", "rm", "cred", "test", "run", "snaps", "restore", "verify")
+        for action in ("add", "init", "ls", "rm", "cred", "test", "snaps", "verify")
     }
-    _route(args, "backup", routes)
+    _route(args, "remote", routes)

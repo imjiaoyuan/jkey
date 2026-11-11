@@ -13,6 +13,10 @@ from jkey.pv.backup.remotes.base import Remote
 def open_remote(cfg: dict) -> Remote:
     """Build a Remote from a remotes.json entry: {'url': ..., 'endpoint': ..., ...}."""
     url = cfg.get("url", "")
+    if url.startswith("rclone:"):
+        from jkey.pv.backup.remotes.rclone import RcloneRemote
+
+        return RcloneRemote(url)
     scheme = urlparse(url).scheme.lower()
     # Windows drive letters ("C:\..." or "C:/...") parse as a scheme — still a local path.
     if len(scheme) == 1 and len(url) > 2 and url[1] == ":" and url[2] in ("\\", "/"):
@@ -35,4 +39,6 @@ def open_remote(cfg: dict) -> Remote:
 
         return LocalRemote(url, cfg.get("endpoint"), cfg.get("region"))
 
-    raise JkeyError(f"Unsupported backup URL scheme: {url!r} (supported: local path, s3://bucket/prefix)")
+    raise JkeyError(
+        f"Unsupported backup URL scheme: {url!r} (supported: local path, s3://bucket/prefix, rclone:<remote>)"
+    )

@@ -136,14 +136,14 @@ class TestParser:
         return _build_parser()
 
     def test_add_minimal(self):
-        args = self._parser().parse_args(["backup", "add", "nas", "/mnt/nas"])
-        assert (args.command, args.action, args.name, args.url) == ("backup", "add", "nas", "/mnt/nas")
+        args = self._parser().parse_args(["remote", "add", "nas", "/mnt/nas"])
+        assert (args.command, args.action, args.name, args.url) == ("remote", "add", "nas", "/mnt/nas")
         assert args.no_test is False and args.force is False
 
     def test_add_s3_full(self):
         args = self._parser().parse_args(
             [
-                "backup",
+                "remote",
                 "add",
                 "aws",
                 "s3://bkt/prefix",
@@ -166,19 +166,19 @@ class TestParser:
 
     def test_run_all_and_single(self):
         p = self._parser()
-        assert p.parse_args(["backup", "run"]).name is None
-        assert p.parse_args(["backup", "run", "aws", "-k", "1"]).name == "aws"
+        assert p.parse_args(["backup", "run"]).name == "run"
+        assert p.parse_args(["backup", "aws", "-k", "1"]).name == "aws"
 
     def test_init_accepts_no_editor_flag(self):
-        args = self._parser().parse_args(["backup", "init", "--no-editor"])
+        args = self._parser().parse_args(["remote", "init", "--no-editor"])
         assert args.no_editor is True
 
     def test_restore_defaults(self):
-        args = self._parser().parse_args(["backup", "restore", "aws"])
-        assert args.date is None and args.output is None and args.into_vault is False
+        args = self._parser().parse_args(["restore", "aws"])
+        assert args.date is None and args.output is None
 
     def test_verify_date(self):
-        assert self._parser().parse_args(["backup", "verify", "aws", "-d", "20250101-000000"]).date == "20250101-000000"
+        assert self._parser().parse_args(["remote", "verify", "aws", "-d", "20250101-000000"]).date == "20250101-000000"
 
 
 class TestRemotesCmd:
