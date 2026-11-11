@@ -36,3 +36,15 @@ def vault(vault_dir):
     core.encrypt_file(core.RECOVERY_FILE, {}, pw)
     core.unlock_all(pw)
     return core
+
+
+@pytest.fixture(autouse=True)
+def native_session_store(monkeypatch):
+    """Exercise session lifecycle without accessing the developer's OS credential store."""
+    from jkey.pv import session_store
+
+    passwords = {}
+    monkeypatch.setattr(session_store, "save", lambda path, password: passwords.__setitem__(path, password) is None)
+    monkeypatch.setattr(session_store, "load", lambda path: passwords.get(path))
+    monkeypatch.setattr(session_store, "delete", lambda path: passwords.pop(path, None))
+    return passwords

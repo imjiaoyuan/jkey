@@ -8,10 +8,11 @@ import sys
 import time
 
 from jkey.errors import JkeyError
+from jkey.pv import session_store, transaction
 
 
 def _aes():
-    """Import the AES module lazily so session-cached reads avoid its import cost."""
+    """Import AES only when encryption or decryption is needed."""
     from jkey import aes
 
     return aes
@@ -61,8 +62,10 @@ def _lock_vault(shared: bool = False):
     import portalocker
 
     ensure_dir()
-    mode = portalocker.LOCK_SH if shared else portalocker.LOCK_EX
+    # Recovery can write; serialize readers too so a crashed transaction is repaired first.
+    mode = portalocker.LOCK_EX
     with portalocker.Lock(VAULT_LOCK_PATH, "a+", flags=mode) as _fh:
+        transaction.recover(CONFIG_DIR)
         yield
 
 
@@ -75,6 +78,9 @@ _recovery_cache: dict | None = None
 def ensure_dir():
     os.makedirs(CONFIG_DIR, mode=0o700, exist_ok=True)
     os.makedirs(QR_DIR, mode=0o700, exist_ok=True)
+    _remove_legacy_session()
+    for path in list(_iter_session_files()):
+        _ticket(path)
 
 
 def password_from_env() -> str | None:
@@ -123,15 +129,13 @@ def filter_keys(data: dict, keyword: str | None) -> list[str]:
 
 
 def _stage_write(path: str, data: bytes) -> str:
-    tmp = path + ".tmp"
-    fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-    with os.fdopen(fd, "wb") as f:
-        f.write(data)
-    return tmp
+    return transaction.stage(path, data)
 
 
 def _atomic_write(path: str, data: bytes):
-    os.replace(_stage_write(path, data), path)
+    transaction.write(path, data)
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path + ".tmp")
 
 
 def _terminal_id() -> str:
@@ -169,18 +173,18 @@ _LEGACY_SESSION_FILE = os.path.join(CONFIG_DIR, ".session")
 
 
 def _remove_legacy_session():
-    """Drop the pre-tty-tickets plaintext .session so no stale master password lingers."""
+    """Remove both legacy plaintext tickets and their interrupted-write leftovers."""
+    paths = [_LEGACY_SESSION_FILE, _LEGACY_SESSION_FILE + ".tmp"]
     with contextlib.suppress(OSError):
-        os.unlink(_LEGACY_SESSION_FILE)
+        paths.extend(os.path.join(SESSION_DIR, name) for name in os.listdir(SESSION_DIR)
+                     if name.endswith(".json.tmp"))
+    for path in paths:
+        with contextlib.suppress(OSError):
+            os.unlink(path)
 
 
 def _vault_fingerprint() -> str:
-    """Cheap change-detector over the on-disk vault files (hash bytes, no decryption).
-
-    Tickets record the fingerprint at save time; if another process (or a backup restore)
-    replaced the files since, the ticket no longer matches and is rejected — a stale
-    in-memory cache can never be written back over newer data.
-    """
+    """Invalidate cached credentials whenever the encrypted data generation changes."""
     h = hashlib.sha256()
     for path in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE):
         try:
@@ -194,87 +198,69 @@ def _vault_fingerprint() -> str:
 def _save_session(password, totp, passwords, recovery):
     ensure_dir()
     os.makedirs(SESSION_DIR, mode=0o700, exist_ok=True)
-    payload = {
-        "sv": 3,
-        "password": password,
-        "totp": totp,
-        "passwords": passwords,
-        "recovery": recovery,
-        "expires": time.time() + SESSION_TIMEOUT,
-        "vault_fp": _vault_fingerprint(),
-    }
     _remove_legacy_session()
+    # Remove obsolete plaintext tickets for every terminal on first use.
+    for path in list(_iter_session_files()):
+        _ticket(path)
+    path = _session_file()
+    if not session_store.save(path, password):
+        _delete_ticket(path)
+        print("Session caching unavailable: no unlocked native OS credential store; "
+              "new commands require authentication.", file=sys.stderr)
+        return
+    payload = {"sv": 4, "expires": time.time() + SESSION_TIMEOUT, "vault_fp": _vault_fingerprint()}
     try:
-        _atomic_write(_session_file(), json.dumps(payload).encode("utf-8"))
+        _atomic_write(path, json.dumps(payload).encode("utf-8"))
     except OSError as e:
+        _delete_ticket(path)
         print(f"Warning: failed to save session cache: {e}", file=sys.stderr)
 
 
-def _load_session() -> bool:
-    global _session_password, _totp_cache, _passwords_cache, _recovery_cache
-    path = _session_file()
+def _delete_ticket(path):
+    session_store.delete(path)
+    with contextlib.suppress(FileNotFoundError):
+        os.unlink(path)
+
+
+def _ticket(path):
     try:
         with open(path, encoding="utf-8") as f:
             data = json.load(f)
-    except (OSError, json.JSONDecodeError):
+        if (not isinstance(data, dict) or data.get("sv") != 4
+                or not isinstance(data.get("expires"), (int, float))
+                or not time.time() < data["expires"]
+                or data.get("vault_fp") != _vault_fingerprint()):
+            _delete_ticket(path)
+            return None
+        return data
+    except (OSError, ValueError):
+        with contextlib.suppress(OSError):
+            _delete_ticket(path)
+        return None
+
+
+def _load_session() -> bool:
+    _remove_legacy_session()
+    path = _session_file()
+    if _ticket(path) is None:
         return False
-    if not isinstance(data, dict):
-        _clear_session()
+    password = session_store.load(path)
+    if not isinstance(password, str) or not unlock_all(password):
+        _delete_ticket(path)
         return False
-    sv = data.get("sv", 1)
-    expires = data.get("expires")
-    password = data.get("password")
-    totp = data.get("totp")
-    passwords = data.get("passwords")
-    recovery = data.get("recovery")
-    if not isinstance(sv, int) or sv < 3 or not isinstance(expires, (int, float)):
-        _clear_session()
-        return False
-    if time.time() >= expires:
-        _clear_session()
-        return False
-    if not isinstance(password, str) or not all(isinstance(c, dict) for c in (totp, passwords, recovery)):
-        _clear_session()
-        return False
-    if data.get("vault_fp") != _vault_fingerprint():
-        # Vault files changed since this ticket was written (other terminal wrote, master
-        # password changed, or a restore replaced them) — the cached data is stale.
-        _clear_session()
-        return False
-    _session_password = password
-    _totp_cache = totp
-    _passwords_cache = passwords
-    _recovery_cache = recovery
-    _save_session(_session_password, _totp_cache, _passwords_cache, _recovery_cache)
     return True
 
 
 def has_session(this_terminal_only: bool = False) -> bool:
-    """True if a live (non-expired) ticket exists, without loading it into memory.
-
-    By default checks ANY terminal (global view for `pv status` / `pv lock`);
-    this_terminal_only=True checks just the calling terminal's own ticket (`pv unlock`).
-    """
+    _remove_legacy_session()
     paths = [_session_file()] if this_terminal_only else list(_iter_session_files())
-    for path in paths:
-        try:
-            with open(path, encoding="utf-8") as f:
-                data = json.load(f)
-        except (OSError, json.JSONDecodeError):
-            continue
-        if not isinstance(data, dict):
-            continue
-        sv = data.get("sv", 1)
-        expires = data.get("expires")
-        if isinstance(sv, int) and sv >= 3 and isinstance(expires, (int, float)) and time.time() < expires:
-            return True
-    return False
+    return any(_ticket(path) is not None and session_store.load(path) is not None for path in paths)
 
 
 def _clear_session():
     """Remove this terminal's ticket (leave other terminals' tickets alone)."""
     try:
-        os.unlink(_session_file())
+        _delete_ticket(_session_file())
     except FileNotFoundError:
         pass
     except OSError as e:
@@ -286,19 +272,19 @@ def _clear_all_sessions():
     _remove_legacy_session()
     for path in list(_iter_session_files()):
         try:
-            os.unlink(path)
+            _delete_ticket(path)
         except OSError:
             pass
 
 
 def read_jkey(path: str) -> dict | None:
-    if not os.path.exists(path):
-        return None
     with _lock_vault(shared=True):
         try:
             with open(path, "r", encoding="utf-8") as f:
                 return json.load(f)
-        except (json.JSONDecodeError, UnicodeDecodeError, OSError) as e:
+        except FileNotFoundError:
+            return None
+        except (ValueError, OSError) as e:
             raise JkeyError(f"cannot read vault file {path}: {e}") from e
 
 
@@ -313,11 +299,7 @@ def write_secure_text(
     path: str, content: str, encoding: str = "utf-8", newline: str | None = None, atomic: bool = False
 ):
     if atomic:
-        tmp = path + ".tmp"
-        fd = os.open(tmp, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
-        with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
-            f.write(content)
-        os.replace(tmp, path)
+        _atomic_write(path, content.encode(encoding))
     else:
         fd = os.open(path, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
         with os.fdopen(fd, "w", encoding=encoding, newline=newline) as f:
@@ -335,24 +317,32 @@ def write_secure_bytes(path: str, content: bytes, atomic: bool = False):
 
 
 def vault_exists() -> bool:
+    if os.path.exists(os.path.join(CONFIG_DIR, ".transaction")):
+        with _lock_vault():
+            pass
     return any(os.path.exists(p) for p in (TOTP_FILE, PASSWORDS_FILE, RECOVERY_FILE))
 
 
 def _decrypt_all(password: str) -> dict[str, dict] | None:
-    result: dict[str, dict] = {}
-    any_exists = False
+    with _lock_vault(shared=True):
+        return _decrypt_all_locked(password)
+
+
+def _decrypt_all_locked(password):
+    result = {}
     for path, key in ((TOTP_FILE, "totp"), (PASSWORDS_FILE, "passwords"), (RECOVERY_FILE, "recovery")):
         if not os.path.exists(path):
             continue
-        any_exists = True
-        encrypted = read_jkey(path)
-        if encrypted is None:
-            return None
+        try:
+            with open(path, encoding="utf-8") as f:
+                encrypted = json.load(f)
+        except (OSError, ValueError) as e:
+            raise JkeyError(f"cannot read vault file {path}: {e}") from e
         decrypted = _aes().decrypt(encrypted, password)
         if decrypted is None:
             return None
         result[key] = decrypted
-    return result if any_exists else None
+    return result or None
 
 
 def verify_password(password: str) -> bool:
@@ -432,26 +422,30 @@ def change_master_password(new_password: str) -> bool:
     global _session_password
     if _session_password is None or _totp_cache is None:
         return False
-    totp = _totp_cache
-    passwords = _passwords_cache if _passwords_cache is not None else {}
-    recovery = _recovery_cache if _recovery_cache is not None else {}
-    files = ((TOTP_FILE, totp), (PASSWORDS_FILE, passwords), (RECOVERY_FILE, recovery))
     with _lock_vault():
-        staged = []
         try:
+            data = _decrypt_all_locked(_session_password)
+            if data is None:
+                raise JkeyError("Vault changed; unlock again before changing the password.")
             aes = _aes()
-            for path, data in files:
-                payload = json.dumps(aes.encrypt(data, new_password), indent=4, ensure_ascii=False)
-                staged.append((path, _stage_write(path, payload.encode("utf-8"))))
-            for path, tmp in staged:
-                os.replace(tmp, path)
-        except OSError as e:
-            for _path, tmp in staged:
-                with contextlib.suppress(OSError):
-                    os.unlink(tmp)
+            updates = {}
+            for name, key in (("totp.jkey", "totp"), ("passwords.jkey", "passwords"), ("recovery.jkey", "recovery")):
+                updates[name] = json.dumps(aes.encrypt(data.get(key, {}), new_password)).encode()
+            for name in sorted(os.listdir(QR_DIR)):
+                if name.endswith(_JKEY_EXT):
+                    path = os.path.join(QR_DIR, name)
+                    if os.path.islink(path):
+                        raise JkeyError(f"Refusing QR symlink: {name}")
+                    with open(path, encoding="utf-8") as f:
+                        qr = aes.decrypt(json.load(f), _session_password)
+                    if qr is None:
+                        raise JkeyError(f"Cannot decrypt QR image {name}; password not changed.")
+                    updates[f"qr/{name}"] = json.dumps(aes.encrypt(qr, new_password)).encode()
+            transaction.replace(CONFIG_DIR, updates)
+        except (OSError, ValueError) as e:
             raise JkeyError(f"failed to re-encrypt vault: {e}") from e
-    _session_password = new_password
-    _save_session(new_password, totp, passwords, recovery)
+        lock()
+        set_unlocked(new_password, data.get("totp", {}), data.get("passwords", {}), data.get("recovery", {}))
     return True
 
 
@@ -519,7 +513,8 @@ def delete_qr_image(name: str) -> bool:
     if not os.path.exists(path):
         return False
     try:
-        os.unlink(path)
+        with _lock_vault():
+            os.unlink(path)
     except FileNotFoundError:
         return True
     except PermissionError as e:

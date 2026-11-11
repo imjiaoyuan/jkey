@@ -112,11 +112,8 @@ class TestSession:
         _save_session("pw", {"a": 1}, {"b": 2}, {"c": 3})
         with open(core._session_file()) as f:
             raw = json.load(f)
-        assert raw["sv"] == 3
-        assert raw["password"] == "pw"
-        assert raw["totp"] == {"a": 1}
-        assert raw["passwords"] == {"b": 2}
-        assert raw["recovery"] == {"c": 3}
+        assert raw["sv"] == 4
+        assert not {"password", "totp", "passwords", "recovery"} & raw.keys()
         assert "expires" in raw
 
     def test_corrupted_session(self, vault_dir):
@@ -169,11 +166,11 @@ class TestTtyTickets:
 
         tid = "/dev/pts/42"
         monkeypatch.setattr(core, "_terminal_id", lambda: tid)
-        core._save_session("pw", {"a": 1}, {}, {})
+        core._save_session("test-password", {"a": 1}, {}, {})
         core._session_password = None
         core._totp_cache = None
         assert core._load_session() is True
-        assert core._session_password == "pw"
+        assert core._session_password == "test-password"
 
     def test_lock_clears_all_terminals(self, vault, monkeypatch):
         import jkey.pv.core as core
@@ -459,7 +456,7 @@ class TestSessionV2:
         core._save_session("pw", {"a": 1}, {}, {})
         with open(core._session_file()) as f:
             raw = json.load(f)
-        assert raw["sv"] == 3
+        assert raw["sv"] == 4
         assert core._load_session() is True
 
     def test_activity_based_timeout_reset(self, vault_dir, monkeypatch):
@@ -561,8 +558,12 @@ class TestChangeMasterPassword:
         core.save_totp({"acc": "SECRET"})
         core.save_passwords({"site": "pass"})
 
+        original_replace = os.replace
+
         def fail_replace(src, dst):
-            raise OSError("disk full")
+            if str(src).endswith("new-1"):
+                raise OSError("disk full")
+            return original_replace(src, dst)
 
         # Separate MonkeyPatch scope: undo() here must not revert the vault_dir fixture's patches.
         mp = pytest.MonkeyPatch()
