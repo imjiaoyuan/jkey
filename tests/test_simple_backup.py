@@ -63,6 +63,31 @@ def test_identical_restore_makes_no_backup(vault_dir, tmp_path):
     assert not list(vault_dir.rglob("*.bak"))
 
 
+def test_bak_can_be_decrypted_and_merged_without_unlocking_current_vault(vault_dir, tmp_path, monkeypatch):
+    from jkey.pv.decrypt import decrypt_file
+    from jkey.pv.encrypt import encrypt_file
+
+    core.ensure_dir()
+    core.write_jkey(core.TOTP_FILE, aes.encrypt({"new": "data"}, "new-password"))
+    old = Path(core.PASSWORDS_FILE + ".bak")
+    old.write_text(json.dumps(aes.encrypt({"old-site": "old-value"}, "old-password")))
+    monkeypatch.setattr(core, "prompt_password", lambda *_: "old-password")
+    decrypted = tmp_path / "merged.json"
+    decrypt_file(str(old), str(decrypted))
+    assert json.loads(decrypted.read_text()) == {"old-site": "old-value"}
+    assert not core.is_unlocked()
+    # Re-encryption produces the native dictionary, rather than wrapping JSON as a binary file.
+    decrypted.write_text(json.dumps({"old-site": "old-value", "new-site": "new-value"}))
+    monkeypatch.setattr(core, "prompt_password", lambda *_: "new-password")
+    output = Path(core.PASSWORDS_FILE)
+    encrypt_file(str(decrypted), str(output), json_data=True)
+    assert aes.decrypt(json.loads(output.read_text()), "new-password") == {
+        "old-site": "old-value", "new-site": "new-value"}
+    assert old.exists()
+    assert core.unlock_all("new-password")
+    assert core.load_passwords() == {"old-site": "old-value", "new-site": "new-value"}
+
+
 @pytest.mark.parametrize("url,root", [
     ("rclone:r2", "r2:"),
     ("rclone:r2:bucket/jkey", "r2:bucket/jkey"),

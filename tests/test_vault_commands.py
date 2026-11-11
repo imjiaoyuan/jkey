@@ -219,7 +219,7 @@ class TestCmdDecrypt:
         with pytest.raises(JkeyError, match="not found"):
             decrypt_file("/nonexistent.jkey")
 
-    def test_decrypt_wrong_password(self, vault, tmp_path, capsys):
+    def test_decrypt_wrong_password(self, vault, tmp_path, capsys, monkeypatch):
         """Test decrypt with wrong session password."""
         import jkey.pv.core as core
         from jkey import aes
@@ -233,6 +233,7 @@ class TestCmdDecrypt:
         with open(encrypted_path, "w") as f:
             json.dump(encrypted, f)
 
+        monkeypatch.setattr(core, "prompt_password", lambda *_: None)
         original = core._session_password
         core._session_password = "wrong"
         try:

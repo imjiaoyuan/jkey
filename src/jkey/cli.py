@@ -87,6 +87,7 @@ def _build_parser():
     p2.add_parser("status", help="Show vault status")
     p2.add_parser("set-pw", help="Set master password")
     e = p2.add_parser("encrypt", help="Encrypt a file")
+    e.add_argument("--json", action="store_true", help="Encrypt edited JSON as native vault data")
     e.add_argument("input")
     e.add_argument("-o", "--output")
     d = p2.add_parser("decrypt", help="Decrypt a .jkey file")
@@ -257,7 +258,7 @@ def _pv(args):
         "lock": ("jkey.pv.lock", "cmd_lock", _noargs),
         "status": ("jkey.pv.status", "cmd_status", _noargs),
         "set-pw": ("jkey.pv.set_pw", "cmd_set_pw", _noargs),
-        "encrypt": ("jkey.pv.encrypt", "encrypt_file", lambda a: (a.input, a.output)),
+        "encrypt": ("jkey.pv.encrypt", "encrypt_file", lambda a: (a.input, a.output, a.json)),
         "decrypt": ("jkey.pv.decrypt", "decrypt_file", lambda a: (a.input, a.output)),
         "export": ("jkey.pv.export", "cmd_export", lambda a: (a,)),
     }
