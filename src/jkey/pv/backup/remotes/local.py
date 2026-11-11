@@ -1,10 +1,14 @@
 """Local filesystem backend — NAS mounts, USB drives, or any mounted path. Zero dependencies."""
 
+import contextlib
 import os
 import shutil
-import time
+import uuid
+
+import portalocker
 
 from jkey.errors import JkeyError
+from jkey.pv import transaction
 from jkey.pv.backup.remotes.base import Remote, safe_remote_key
 
 _INVALID_FS_CHARS = '<>:"/\\|?*'
@@ -29,8 +33,22 @@ class LocalRemote(Remote):
         dest = self._path(key)
         try:
             os.makedirs(os.path.dirname(dest), mode=0o700, exist_ok=True)
-            shutil.copyfile(local_path, dest)
-            os.chmod(dest, 0o600)
+            with open(local_path, "rb") as f:
+                tmp = transaction.stage(dest, f.read())
+            try:
+                if key == "LATEST":
+                    os.replace(tmp, dest)
+                else:
+                    # Use a lock + rename so local/NAS/USB filesystems need no hard-link support.
+                    lock = os.path.join(self.root, ".jkey-backup.lock")
+                    with portalocker.Lock(lock, "a+", flags=portalocker.LOCK_EX):
+                        if os.path.lexists(dest):
+                            raise FileExistsError(f"Backup object already exists: {key}")
+                        os.replace(tmp, dest)
+                transaction.sync_dir(self.root)
+            finally:
+                with contextlib.suppress(FileNotFoundError):
+                    os.unlink(tmp)
         except OSError as e:
             raise JkeyError(f"backup write failed ({self.url}/{key}): {e}") from e
         if progress:
@@ -72,20 +90,26 @@ class LocalRemote(Remote):
 
     def probe(self) -> None:
         """Write, read back, verify, delete a probe file — proves the target is usable."""
-        key = f"{time.strftime('%Y%m%d-%H%M%S')}.sha256"  # manifest-style name passes the key whitelist
+        key = f".probe-{uuid.uuid4().hex}"
         probe_path = self._path(key)
+        created = False
+        succeeded = False
         try:
             os.makedirs(self.root, mode=0o700, exist_ok=True)
             payload = b"jkey probe"
-            with open(probe_path, "wb") as f:
+            with open(probe_path, "xb") as f:
+                created = True
                 f.write(payload)
             with open(probe_path, "rb") as f:
                 if f.read() != payload:
                     raise JkeyError("probe read-back mismatch")
+            succeeded = True
         except OSError as e:
             raise JkeyError(f"backup target not writable ({self.root}): {e}") from e
         finally:
-            try:
-                os.unlink(probe_path)
-            except OSError:
-                pass
+            if created:
+                try:
+                    os.unlink(probe_path)
+                except OSError as e:
+                    if succeeded:
+                        raise JkeyError(f"probe delete failed ({self.root}): {e}") from e

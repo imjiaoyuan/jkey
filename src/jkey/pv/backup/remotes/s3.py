@@ -95,16 +95,26 @@ class S3Remote(Remote):
             raise _wrap_s3_error("download", self.url, e) from e
 
     def list_keys(self) -> list[str]:
-        try:
-            resp = self._s3().list_objects_v2(Bucket=self.bucket, Prefix=f"{self.prefix}/" if self.prefix else "")
-        except Exception as e:
-            raise _wrap_s3_error("list", self.url, e) from e
         names = []
         plen = len(self.prefix) + 1 if self.prefix else 0
-        for obj in resp.get("Contents", []):
-            name = obj["Key"][plen:]
-            if "/" not in name:  # ignore objects nested deeper than the root
-                names.append(name)
+        kwargs = {"Bucket": self.bucket, "Prefix": f"{self.prefix}/" if self.prefix else ""}
+        seen = set()
+        try:
+            while True:
+                resp = self._s3().list_objects_v2(**kwargs)
+                for obj in resp.get("Contents", []):
+                    name = obj["Key"][plen:]
+                    if "/" not in name:
+                        names.append(name)
+                if not resp.get("IsTruncated"):
+                    break
+                token = resp.get("NextContinuationToken")
+                if not token or token in seen:
+                    raise JkeyError("S3 returned a truncated listing without a usable continuation token")
+                seen.add(token)
+                kwargs["ContinuationToken"] = token
+        except Exception as e:
+            raise _wrap_s3_error("list", self.url, e) from e
         return sorted(names)
 
     def size(self, key: str) -> int | None:
@@ -121,9 +131,9 @@ class S3Remote(Remote):
             raise _wrap_s3_error("delete", self.url, e) from e
 
     def probe(self) -> None:
-        import time
+        import uuid
 
-        key = self._key(f"{time.strftime('%Y%m%d-%H%M%S')}.sha256")  # manifest-style probe name
+        key = self._key(f".probe-{uuid.uuid4().hex}")
         s3 = self._s3()
         try:
             import io
@@ -131,10 +141,12 @@ class S3Remote(Remote):
             s3.upload_fileobj(io.BytesIO(_PROBE_BODY), self.bucket, key)
         except Exception as e:
             raise _wrap_s3_error("probe write", self.url, e) from e
+        succeeded = False
         try:
             resp = s3.get_object(Bucket=self.bucket, Key=key)
             if resp["Body"].read() != _PROBE_BODY:
                 raise JkeyError("probe read-back mismatch")
+            succeeded = True
         except JkeyError:
             raise
         except Exception as e:
@@ -142,5 +154,6 @@ class S3Remote(Remote):
         finally:
             try:
                 s3.delete_object(Bucket=self.bucket, Key=key)
-            except Exception:
-                pass
+            except Exception as e:
+                if succeeded:
+                    raise _wrap_s3_error("probe delete", self.url, e) from e

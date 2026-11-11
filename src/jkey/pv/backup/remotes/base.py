@@ -3,8 +3,9 @@
 import re
 from abc import ABC, abstractmethod
 
-_SNAPSHOT_RE = re.compile(r"^\d{8}-\d{6}\.tar\.gz$")
-_MANIFEST_RE = re.compile(r"^\d{8}-\d{6}\.sha256$")
+_SNAPSHOT_RE = re.compile(r"^\d{8}-\d{6}(?:-[0-9a-f]{32})?\.tar\.gz\Z")
+_MANIFEST_RE = re.compile(r"^\d{8}-\d{6}(?:-[0-9a-f]{32})?\.sha256\Z")
+_PROBE_RE = re.compile(r"^\.probe-[0-9a-f]{32}\Z")
 _LATEST = "LATEST"
 
 
@@ -25,7 +26,7 @@ def safe_remote_key(name: str) -> str | None:
 
     Returns None for anything else — callers must treat None as 'refuse to touch'.
     """
-    if name == _LATEST or _SNAPSHOT_RE.match(name) or _MANIFEST_RE.match(name):
+    if name == _LATEST or _SNAPSHOT_RE.match(name) or _MANIFEST_RE.match(name) or _PROBE_RE.match(name):
         return name
     return None
 

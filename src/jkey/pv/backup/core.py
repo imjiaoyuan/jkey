@@ -1,4 +1,4 @@
-"""Vault backup to S3 / S3-compatible / local remotes.
+"""Vault backup to S3, local directories, and existing rclone remotes.
 
 Backs up the encrypted vault files as-is — no master password involved, nothing plaintext
 ever leaves the machine. Remote layout per remote root:
@@ -10,7 +10,10 @@ ever leaves the machine. Remote layout per remote root:
 Remotes are configured in ~/.config/jkey/remotes.json (mode 600, same dir as the vault).
 """
 
+import base64
+import binascii
 import hashlib
+import io
 import json
 import os
 import sys
@@ -18,10 +21,11 @@ import tarfile
 import tempfile
 import textwrap
 import time
+import uuid
 from urllib.parse import urlparse
 
 from jkey.errors import JkeyError
-from jkey.pv import core
+from jkey.pv import core, transaction
 from jkey.pv.backup.remotes import open_remote
 from jkey.pv.backup.remotes.base import _LATEST, snapshot_stamp, valid_snapshot
 
@@ -53,7 +57,7 @@ def save_remotes(remotes: dict) -> None:
     text = (
         textwrap.dedent(
             """\
-        # jkey backup remotes. Edit with: jkey backup init
+        # jkey backup remotes. Edit with: jkey remote init
         # One JSON object per remote. Fill url (s3://bucket/prefix or a local path),
         # rename the key to your remote's name, then delete its _comment.
         # Entries whose url is still empty are template placeholders — jkey ignores them.
@@ -65,15 +69,18 @@ def save_remotes(remotes: dict) -> None:
         + json.dumps(remotes, indent=4, ensure_ascii=False)
         + "\n"
     )
+    core.ensure_dir()
     core.write_secure_text(_remotes_file(), text, atomic=True)
 
 
 def _get_remote(name: str, remotes: dict | None = None) -> dict:
+    if name.startswith("rclone:"):
+        return {"url": name}
     cfg = (remotes if remotes is not None else load_remotes()).get(name)
     if cfg is None:
-        raise JkeyError(f"Backup remote '{name}' not configured. Run 'jkey backup init' to edit the config.")
+        raise JkeyError(f"Backup remote '{name}' not configured. Run 'jkey remote init' to edit the config.")
     if not cfg.get("url"):
-        raise JkeyError(f"Backup remote '{name}' is a template entry: fill in 'url' with 'jkey backup init'.")
+        raise JkeyError(f"Backup remote '{name}' is a template entry: fill in 'url' with 'jkey remote init'.")
     return cfg
 
 
@@ -109,9 +116,23 @@ def _collect_vault_files() -> list[tuple[str, str]]:
 
 
 def _build_snapshot(pairs: list[tuple[str, str]], dest: str) -> str:
+    metadata = {"version": 1, "files": {}}
     with tarfile.open(dest, "w:gz") as tar:
         for arcname, path in pairs:
-            tar.add(path, arcname=arcname)
+            if not os.path.isfile(path) or os.path.islink(path):
+                raise JkeyError(f"Refusing non-regular vault file: {path}")
+            with open(path, "rb") as f:
+                data = f.read()
+            metadata["files"][arcname] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+            info = tarfile.TarInfo(arcname)
+            info.mode = 0o600
+            info.size = len(data)
+            tar.addfile(info, io.BytesIO(data))
+        payload = json.dumps(metadata, sort_keys=True).encode()
+        info = tarfile.TarInfo("snapshot.json")
+        info.mode = 0o600
+        info.size = len(payload)
+        tar.addfile(info, io.BytesIO(payload))
     return dest
 
 
@@ -131,31 +152,23 @@ def _snapshot_names(remote) -> list[str]:
     return sorted(n for n in remote.list_keys() if valid_snapshot(n))
 
 
-def _latest_stamp(remote) -> str | None:
-    """Prefer the LATEST pointer; fall back to the newest snapshot on the remote."""
-    import contextlib
+def _completed_snapshot_names(remote):
+    keys = set(remote.list_keys())
+    return sorted(n for n in keys if valid_snapshot(n) and f"{snapshot_stamp(n)}.sha256" in keys)
 
-    tmp = tempfile.NamedTemporaryFile(delete=False)
-    tmp.close()
-    try:
-        with contextlib.suppress(Exception):
-            remote.get(_LATEST, tmp.name)
-            with open(tmp.name, encoding="ascii") as f:
-                name = f.read().strip()
-            if valid_snapshot(name) and name in _snapshot_names(remote):
-                return snapshot_stamp(name)
-        snaps = _snapshot_names(remote)
-        return snapshot_stamp(snaps[-1]) if snaps else None
-    finally:
-        with contextlib.suppress(OSError):
-            os.unlink(tmp.name)
+
+def _latest_stamp(remote) -> str | None:
+    # An interrupted upload must not supersede a completed recovery point.
+    # Listing also avoids a stale LATEST pointer from a concurrent/older writer.
+    snaps = _completed_snapshot_names(remote)
+    return snapshot_stamp(snaps[-1]) if snaps else None
 
 
 def _prune(remote, keep: int) -> list[str]:
     """Delete oldest snapshots beyond `keep`. Returns removed snapshot names."""
     if keep <= 0:
         return []
-    snaps = _snapshot_names(remote)
+    snaps = _completed_snapshot_names(remote)
     to_remove = snaps[:-keep] if len(snaps) > keep else []
     for name in to_remove:
         remote.delete(name)
@@ -164,7 +177,7 @@ def _prune(remote, keep: int) -> list[str]:
 
 
 def _stamp() -> str:
-    return time.strftime("%Y%m%d-%H%M%S")
+    return time.strftime("%Y%m%d-%H%M%S") + "-" + f"{time.time_ns():016x}{uuid.uuid4().hex[:16]}"
 
 
 # ------------------------------------------------------------- subcommand impl
@@ -217,7 +230,7 @@ def _cmd_test(args) -> None:
 def _cmd_ls(args) -> None:
     remotes = load_remotes()
     if not remotes:
-        print(f"No backup remotes configured. Run 'jkey backup init' to create {_remotes_file()}.")
+        print(f"No backup remotes configured. Run 'jkey remote init' to create {_remotes_file()}.")
         return
     for name in sorted(remotes):
         cfg = remotes[name]
@@ -304,7 +317,7 @@ def _cmd_init(args) -> None:
         print(f"Backup config already exists: {_remotes_file()}")
         return
     save_remotes(_INIT_TEMPLATE)
-    print(f"Template written to {_remotes_file()}. Edit it to configure a remote, then run 'jkey backup ls'.")
+    print(f"Template written to {_remotes_file()}. Edit it to configure a remote, then run 'jkey remote ls'.")
 
 
 def urlparse_scheme(url: str) -> str:
@@ -356,40 +369,62 @@ class _TransferProgress:
 def _cmd_run(args) -> None:
     remotes = load_remotes()
     if args.name:
-        _get_remote(args.name, remotes)
+        remotes[args.name] = _get_remote(args.name, remotes)
         names = [args.name]
     else:
         names = [n for n in sorted(remotes) if remotes[n].get("url")]
         if not names:
-            raise JkeyError("No backup remote configured yet. Run 'jkey backup init' and fill in an entry's url.")
+            raise JkeyError("No backup remote configured yet. Run 'jkey remote init' and fill in an entry's url.")
 
-    pairs = _collect_vault_files()
+    # Freeze one complete generation under the vault lock, then upload the same bytes everywhere.
     stamp = _stamp()
-    for name in names:
-        cfg = remotes[name]
-        remote = _remote(cfg)
-        with tempfile.TemporaryDirectory() as tmpdir:
-            archive = _build_snapshot(pairs, os.path.join(tmpdir, f"{stamp}.tar.gz"))
-            digest = _sha256(archive)
-            with open(os.path.join(tmpdir, f"{stamp}.sha256"), "w", encoding="ascii") as f:
-                f.write(f"{digest}  {stamp}.tar.gz\n")
-            size = os.path.getsize(archive)
-            progress = _TransferProgress(f"Uploading {stamp}.tar.gz")
-            progress.set_total(size)
+    failures = []
+    with tempfile.TemporaryDirectory() as tmpdir:
+        archive = os.path.join(tmpdir, f"{stamp}.tar.gz")
+        with core._lock_vault(shared=True):
+            pairs = _collect_vault_files()
+            _build_snapshot(pairs, archive)
+        manifest = os.path.join(tmpdir, f"{stamp}.sha256")
+        with open(manifest, "w", encoding="ascii") as f:
+            f.write(f"{_sha256(archive)}  {stamp}.tar.gz\n")
+        # Check the actual archive before publishing or pruning old snapshots.
+        checked = os.path.join(tmpdir, "checked")
+        os.mkdir(checked, mode=0o700)
+        _extract(archive, checked)
+        for name in names:
+            cfg = remotes[name]
             try:
-                remote.put(archive, f"{stamp}.tar.gz", progress=progress)
-            except BaseException:
-                progress.abort()
-                raise
-            progress.finish()
-            remote.put(os.path.join(tmpdir, f"{stamp}.sha256"), f"{stamp}.sha256")
-            remote.put(_write_latest(tmpdir, stamp), _LATEST)
-        keep = args.keep if args.keep is not None else cfg.get("keep", 5)
-        removed = _prune(remote, keep)
-        msg = f"Backed up to {name} ({cfg['url']}): {stamp}.tar.gz ({len(pairs)} files)"
-        if removed:
-            msg += f", pruned {len(removed)} old snapshot(s)"
-        print(msg)
+                keep = args.keep if args.keep is not None else cfg.get("keep", 5)
+                if not isinstance(keep, int) or isinstance(keep, bool) or keep < 0:
+                    raise JkeyError("keep must be a non-negative integer (0 keeps all snapshots)")
+                remote = _remote(cfg)
+                size = os.path.getsize(archive)
+                progress = _TransferProgress(f"Uploading {stamp}.tar.gz")
+                progress.set_total(size)
+                try:
+                    remote.put(archive, f"{stamp}.tar.gz", progress=progress)
+                except BaseException:
+                    progress.abort()
+                    raise
+                progress.finish()
+                # Read back before declaring success or deleting any previous recovery points.
+                downloaded = os.path.join(tmpdir, "readback.tar.gz")
+                remote.get(f"{stamp}.tar.gz", downloaded)
+                _verify_archive(downloaded, manifest, f"{stamp}.tar.gz")
+                # Publishing the manifest marks a snapshot complete only after read-back succeeds.
+                remote.put(manifest, f"{stamp}.sha256")
+                remote_manifest = os.path.join(tmpdir, "readback.sha256")
+                remote.get(f"{stamp}.sha256", remote_manifest)
+                _verify_archive(downloaded, remote_manifest, f"{stamp}.tar.gz")
+                remote.put(_write_latest(tmpdir, stamp), _LATEST)
+                removed = _prune(remote, keep)
+                print(f"Backed up to {name} ({cfg['url']}): {stamp}.tar.gz ({len(pairs)} files), "
+                      f"verified; pruned {len(removed)} old snapshot(s)")
+            except (JkeyError, OSError) as e:
+                failures.append(f"{name}: {e}")
+                print(f"Backup failed for {name}: {e}", file=sys.stderr)
+    if failures:
+        raise JkeyError("Backup failed for " + "; ".join(failures))
 
 
 def _write_latest(tmpdir: str, stamp: str) -> str:
@@ -404,7 +439,7 @@ def _cmd_snaps(args) -> None:
     remote = _remote(cfg)
     snaps = _snapshot_names(remote)
     if not snaps:
-        print(f"No snapshots on '{args.name}' yet. Run 'jkey backup run {args.name}'.")
+        print(f"No snapshots on '{args.name}' yet. Run 'jkey backup {args.name}'.")
         return
     for n in snaps:
         print(n)
@@ -415,7 +450,7 @@ def _verify_archive(archive: str, manifest_path: str, snapshot: str) -> None:
     try:
         with open(manifest_path, encoding="ascii") as f:
             expected = f.read().split()[0]
-    except (OSError, IndexError):
+    except (OSError, IndexError, UnicodeError):
         raise JkeyError(f"corrupt or missing manifest for {snapshot}")
     actual = _sha256(archive)
     if actual != expected:
@@ -430,10 +465,10 @@ def _cmd_restore(args) -> None:
     if snapshot is None:
         stamp = _latest_stamp(remote)
         if stamp is None:
-            raise JkeyError(f"No snapshots on '{args.name}'. Run 'jkey backup run' first.")
+            raise JkeyError(f"No snapshots on '{args.name}'. Run 'jkey backup <remote>' first.")
         snapshot = f"{stamp}.tar.gz"
     elif not valid_snapshot(snapshot):
-        raise JkeyError(f"Invalid snapshot date: {args.date!r} (expected YYYYMMDD-HHMMSS)")
+        raise JkeyError(f"Invalid snapshot date: {args.date!r} (use the snapshot ID shown by remote snaps)")
 
     tmpdir = tempfile.mkdtemp(prefix="jkey-restore-")
     try:
@@ -447,22 +482,19 @@ def _cmd_restore(args) -> None:
             progress.abort()
             raise
         progress.finish()
-        try:
-            remote.get(f"{snapshot_stamp(snapshot)}.sha256", manifest)
-        except JkeyError:
-            manifest = None  # older snapshot without a manifest — skip verification
-        if manifest:
-            _verify_archive(archive, manifest, snapshot)
+        remote.get(f"{snapshot_stamp(snapshot)}.sha256", manifest)
+        _verify_archive(archive, manifest, snapshot)
 
-        out_dir = args.output
-        if not out_dir:
-            out_dir = os.path.join(os.getcwd(), f"jkey-restore-{snapshot_stamp(snapshot)}")
-        os.makedirs(out_dir, mode=0o700, exist_ok=True)
-        _extract(archive, out_dir)
-        print(f"Restored {args.name}:{snapshot} to {out_dir}")
-
-        if args.into_vault:
-            _confirm_and_write_into_vault(out_dir)
+        into_vault = not args.output
+        out_dir = args.output or os.path.join(tmpdir, "extracted")
+        extracted = os.path.join(tmpdir, "verified")
+        os.mkdir(extracted, mode=0o700)
+        _extract(archive, extracted)
+        if into_vault:
+            _confirm_and_write_into_vault(extracted)
+        else:
+            _restore_files(extracted, out_dir)
+            print(f"Restored {args.name}:{snapshot} to {out_dir}")
     finally:
         import shutil
 
@@ -470,80 +502,122 @@ def _cmd_restore(args) -> None:
 
 
 def _extract(archive: str, out_dir: str) -> None:
-    """Extract a snapshot tar, refusing members that escape out_dir (path traversal)."""
+    """Validate names, types, bounds and file manifest before writing any vault data."""
     base = os.path.realpath(out_dir)
-    with tarfile.open(archive, "r:gz") as tar:
-        for member in tar.getmembers():
-            if member.issym() or member.islnk():
-                raise JkeyError(f"snapshot contains a link — refusing: {member.name}")
-            target = os.path.realpath(os.path.join(base, member.name))
-            if not (target == base or target.startswith(base + os.sep)):
-                raise JkeyError(f"snapshot entry escapes restore dir — refusing: {member.name}")
-            if member.isdev():
-                raise JkeyError(f"snapshot contains a device file — refusing: {member.name}")
-        # `filter` was added in 3.11 and only backported to 3.10.12+; older 3.10.x ignores it.
-        # The manual checks above already cover what filter="data" enforces.
-        if sys.version_info >= (3, 11):
-            tar.extractall(out_dir, filter="data")
-        else:
-            tar.extractall(out_dir)
+    try:
+        with tarfile.open(archive, "r:gz") as tar:
+            members = tar.getmembers()
+            if len(members) > 10000 or sum(m.size for m in members) > 512 * 1024 * 1024:
+                raise JkeyError("Snapshot exceeds restore size or file-count limits")
+            names = set()
+            contents = {}
+            for member in members:
+                name = member.name
+                target = os.path.realpath(os.path.join(base, name))
+                if not target.startswith(base + os.sep):
+                    raise JkeyError(f"snapshot entry escapes restore dir — refusing: {name}")
+                if member.isdir() and name == "qr":
+                    continue  # Legacy archives included the directory entry.
+                if not member.isfile() or name in names:
+                    raise JkeyError(f"snapshot contains a link, special file or duplicate — refusing: {name}")
+                if name != "snapshot.json":
+                    transaction._target(base, name)
+                names.add(name)
+                with tar.extractfile(member) as f:
+                    contents[name] = f.read()
+            payload = contents.pop("snapshot.json", None)
+            if payload is not None:
+                metadata = json.loads(payload)
+                if metadata.get("version") != 1 or not isinstance(metadata.get("files"), dict):
+                    raise JkeyError("Unsupported or corrupt snapshot format")
+                expected = {name: {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
+                            for name, data in contents.items()}
+                if metadata["files"] != expected:
+                    raise JkeyError("Snapshot file manifest mismatch")
+            if not any(name in contents for name in _VAULT_FILES):
+                raise JkeyError("Snapshot contains no vault files")
+            for name, data in contents.items():
+                dest = transaction._target(base, name)
+                dest.parent.mkdir(mode=0o700, exist_ok=True)
+                # Exclusive creation prevents merging a snapshot with pre-existing files.
+                fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
+                with os.fdopen(fd, "wb") as f:
+                    f.write(data)
+    except (tarfile.TarError, OSError, ValueError, TypeError, AttributeError) as e:
+        raise JkeyError(f"Cannot extract snapshot: {e}") from e
+
+
+def _decrypt_snapshot(out_dir, password):
+    """Verify every encrypted payload, including QR images, without touching the live vault."""
+    try:
+        files = [os.path.join(out_dir, n) for n in _VAULT_FILES if os.path.isfile(os.path.join(out_dir, n))]
+        qr_dir = os.path.join(out_dir, "qr")
+        if os.path.isdir(qr_dir):
+            files.extend(os.path.join(qr_dir, n) for n in os.listdir(qr_dir) if n.endswith(".jkey"))
+        for path in files:
+            with open(path, encoding="utf-8") as f:
+                data = core._aes().decrypt(json.load(f), password)
+            if not isinstance(data, dict):
+                return False
+            if os.path.dirname(path) == qr_dir:
+                base64.b64decode(data["raw"], validate=True)
+        return bool(files)
+    except (OSError, ValueError, KeyError, TypeError, binascii.Error):
+        return False
+
+
+def _authenticate_snapshot(out_dir, password=None):
+    candidate = password or core.password_from_env() or core.get_session_password()
+    if candidate is None and core._ticket(core._session_file()) is not None:
+        candidate = core.session_store.load(core._session_file())
+    if candidate and _decrypt_snapshot(out_dir, candidate):
+        return candidate
+    if core.password_from_env():
+        raise JkeyError("Cannot decrypt every snapshot file with JKEY_PASS; vault not changed.")
+    candidate = core.prompt_password("Snapshot master password: ")
+    if not candidate or not _decrypt_snapshot(out_dir, candidate):
+        raise JkeyError("Cannot decrypt every snapshot file; vault not changed.")
+    return candidate
+
+
+def _restore_files(source_dir, target_dir):
+    """Copy encrypted files, retaining local-only data and preserving every conflicting version."""
+    os.makedirs(target_dir, mode=0o700, exist_ok=True)
+    names = [n for n in _VAULT_FILES if os.path.isfile(os.path.join(source_dir, n))]
+    qr = os.path.join(source_dir, "qr")
+    if os.path.isdir(qr):
+        names.extend(f"qr/{n}" for n in sorted(os.listdir(qr)) if n.endswith(".jkey"))
+    for name in names:
+        src = transaction._target(source_dir, name)
+        dest = transaction._target(target_dir, name)
+        dest.parent.mkdir(mode=0o700, exist_ok=True)
+        saved = transaction.preserve_and_write(dest, src.read_bytes())
+        if saved:
+            print(f"Kept previous file: {saved}")
 
 
 def _confirm_and_write_into_vault(out_dir: str) -> None:
-    files = [n for n in _VAULT_FILES if os.path.exists(os.path.join(out_dir, n))]
-    if not files:
-        raise JkeyError("Snapshot contains no vault files.")
-    qr_dir = os.path.join(out_dir, "qr")
-    qr_count = len(os.listdir(qr_dir)) if os.path.isdir(qr_dir) else 0
-    print("This will overwrite the current vault with:")
-    for n in files:
-        print(f"  {n}")
-    if qr_count:
-        print(f"  qr/ ({qr_count} images)")
     try:
-        response = input("Overwrite the current vault? (y/N): ").strip().lower()
+        response = input("Restore files, keeping conflicts as .bak? (y/N): ").strip().lower()
     except (EOFError, KeyboardInterrupt):
         print()
-        raise JkeyError("Restore cancelled.")
+        raise JkeyError("Restore cancelled.") from None
     if response != "y":
         raise JkeyError("Restore cancelled.")
-    _write_into_vault(out_dir, files)
-    # Vault files were replaced behind the caches' back: drop every terminal's ticket and
-    # this process's in-memory copies, so the next command re-authenticates and re-decrypts
-    # from the restored files instead of silently writing the stale cache back over them.
-    core.lock()
-    print("Vault updated. Run 'jkey pv status' and any command to unlock and verify.")
+    _write_into_vault(out_dir, [])
+    print("Vault restored. Conflicts are kept as .bak files for manual resolution.")
 
 
 def _write_into_vault(out_dir: str, files: list[str]) -> None:
-    """Transactional replace: stage everything, then commit with os.replace."""
     core.ensure_dir()
-    staged = []
     try:
-        for name in files:
-            src = os.path.join(out_dir, name)
-            data = open(src, "rb").read()
-            staged.append(
-                (os.path.join(core.CONFIG_DIR, name), core._stage_write(os.path.join(core.CONFIG_DIR, name), data))
-            )
-        qr_src = os.path.join(out_dir, "qr")
-        if os.path.isdir(qr_src):
-            os.makedirs(core.QR_DIR, mode=0o700, exist_ok=True)
-            for img in sorted(os.listdir(qr_src)):
-                if not img.endswith(".jkey"):
-                    continue
-                data = open(os.path.join(qr_src, img), "rb").read()
-                dest = os.path.join(core.QR_DIR, img)
-                staged.append((dest, core._stage_write(dest, data)))
         with core._lock_vault():
-            for dest, tmp in staged:
-                os.replace(tmp, dest)
-    except OSError as e:
-        for _dest, tmp in staged:
             try:
-                os.unlink(tmp)
-            except OSError:
-                pass
+                _restore_files(out_dir, core.CONFIG_DIR)
+            finally:
+                # Some files may already have changed even when a later file fails.
+                core.lock()
+    except OSError as e:
         raise JkeyError(f"failed to restore into vault: {e}") from e
 
 
@@ -553,7 +627,7 @@ def _cmd_verify(args) -> None:
     if args.date:
         snapshot = f"{args.date}.tar.gz"
         if not valid_snapshot(snapshot):
-            raise JkeyError(f"Invalid snapshot date: {args.date!r} (expected YYYYMMDD-HHMMSS)")
+            raise JkeyError(f"Invalid snapshot date: {args.date!r} (use the snapshot ID shown by remote snaps)")
         if snapshot not in _snapshot_names(remote):
             raise JkeyError(f"Snapshot not found on '{args.name}': {snapshot}")
         targets = [snapshot]
@@ -561,6 +635,7 @@ def _cmd_verify(args) -> None:
         targets = _snapshot_names(remote)
         if not targets:
             raise JkeyError(f"No snapshots on '{args.name}'.")
+    password = None
     for snapshot in targets:
         with tempfile.TemporaryDirectory() as tmpdir:
             archive = os.path.join(tmpdir, snapshot)
@@ -575,7 +650,13 @@ def _cmd_verify(args) -> None:
             progress.finish()
             remote.get(f"{snapshot_stamp(snapshot)}.sha256", manifest)
             _verify_archive(archive, manifest, snapshot)
-        print(f"OK: {snapshot}")
+            checked = os.path.join(tmpdir, "checked")
+            os.mkdir(checked, mode=0o700)
+            _extract(archive, checked)
+            if getattr(args, "decrypt", False):
+                password = _authenticate_snapshot(checked, password)
+        suffix = " (all vault files and QR images decrypted)" if getattr(args, "decrypt", False) else ""
+        print(f"OK: {snapshot}{suffix}")
 
 
 # ------------------------------------------------------------------ CLI entry

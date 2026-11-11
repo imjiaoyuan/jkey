@@ -125,7 +125,7 @@ class TestBackupInit:
         bc.save_remotes({"nas": {"url": "/tmp/x"}})
         with open(bc._remotes_file(), encoding="utf-8") as f:
             text = f.read()
-        assert text.startswith("#") and "jkey backup init" in text
+        assert text.startswith("#") and "jkey remote init" in text
         assert bc.load_remotes() == {"nas": {"url": "/tmp/x"}}
 
 
@@ -394,7 +394,7 @@ class TestTransferProgress:
 
         def bad_read(path, *a, **kw):
             fh = real_open(path, *a, **kw)
-            if getattr(fh, "mode", "") == "rb" and path.endswith(".sha256"):
+            if getattr(fh, "mode", "") == "rb" and ".probe-" in str(path):
                 return io.BytesIO(b"corrupted")
             return fh
 
@@ -579,7 +579,7 @@ class TestLifecycle:
         core.save_passwords({})
         monkeypatch.setattr("builtins.input", lambda *_: "y")
         bc._cmd_restore(_args(name="nas", into_vault=True))
-        assert "Vault updated" in capsys.readouterr().out
+        assert "Vault restored" in capsys.readouterr().out
 
         # In-memory cache still shows pre-restore plaintext; verify from disk like a fresh process.
         core.lock()
