@@ -77,65 +77,45 @@ jkey pv decrypt secret.pdf.jkey -o secret.pdf
 | `jkey pv export recovery` | Export recovery codes |
 | `jkey pv export qr -o <dir>` | Export QR code images |
 | `jkey pv export all -o <dir>` | Export everything |
-| `jkey backup init` | Create `remotes.json` from a commented template (prints the path if it already exists) |
-| `jkey backup add <name> <url>` | Configure a backup remote (`s3://bucket/prefix` or local path; S3 url must include the bucket) |
-| `jkey backup ls` | List backup remotes (credentials masked) |
-| `jkey backup rm <name>` | Remove a backup remote |
-| `jkey backup cred <name>` | Set or clear inline S3 credentials |
-| `jkey backup test <name>` | Test remote connectivity (write → read → delete) |
-| `jkey backup run [name]` | Back up now (omit name = all remotes) |
-| `jkey backup snaps <name>` | List snapshots on a remote |
-| `jkey backup restore <name>` | Restore a snapshot (default: latest) |
-| `jkey backup verify <name>` | Verify snapshot checksums on the remote |
+| `jkey remote add <name> <url>` | Configure a local, S3, or rclone backend |
+| `jkey remote ls` | List configured backends |
+| `jkey remote rm <name>` | Remove a backend configuration |
+| `jkey backup <name>` | Upload the encrypted vault |
+| `jkey restore <name>` | Restore the latest backup; keep local conflicts as `.bak` |
+
 
 Set `JKEY_PASS` environment variable to skip the password prompt. Set `JKEY_SESSION_TIMEOUT` to change the session cache lifetime (default: 300 seconds).
 
-Sessions work like `sudo`'s per-TTY tickets: unlocking in one terminal window does **not** unlock other windows — each window authenticates on its own use. `jkey pv lock` locks every window at once.
+Sessions use per-terminal tickets: unlocking in one terminal window does **not** unlock other windows. The master password is cached only in a native OS credential store (Linux Secret Service, macOS Keychain, or Windows Credential Manager). Disk tickets contain only expiry and vault fingerprint metadata; decrypted records are never cached on disk. Old plaintext tickets are removed on first use. If no supported, unlocked credential store is available, commands work normally but each new command requires authentication. `jkey pv lock` invalidates every terminal's ticket and removes its cached credential.
 
 ## Backup & Restore
 
-Backups copy the **already-encrypted** vault files (`.jkey`) to a remote as timestamped tar.gz snapshots — no master password is needed, nothing plaintext ever leaves the machine. `.session` is never backed up.
+Configure a backend once, then upload and restore with one command each:
 
 ```bash
-pip install "jkey[s3]"   # S3 support (local-path remotes need no extra dependency)
-
-# Create the config, then edit the file yourself: rename a key, fill url/keys, save.
-# The template documents every field; entries whose url is still empty are placeholders jkey skips.
-jkey backup init
-vi ~/.config/jkey/remotes.json   # Windows: %APPDATA%/jkey/remotes.json
-
-# S3 bucket note: the bucket must already exist (create it in the provider console first);
-# jkey never creates buckets — url = s3://<bucket>/<prefix>
-
-# AWS S3 — credentials come from the standard AWS chain (~/.aws, env vars, IAM role)
-jkey backup add aws s3://my-bucket/jkey --region ap-east-1
-
-# S3-compatible providers (Aliyun OSS, Tencent COS, MinIO, Cloudflare R2, Backblaze B2)
-jkey backup add oss s3://my-bucket/jkey \
-    --endpoint https://oss-cn-hangzhou.aliyuncs.com \
-    --region cn-hangzhou --access-key LTAI... --secret-key ***
-
-# Local path (NAS mount, USB drive) — no credentials involved
-jkey backup add nas /mnt/nas/jkey-backup -k 10
-
-jkey backup test aws              # PUT → GET → DELETE probe
-jkey backup run                   # back up to all remotes
-jkey backup run aws -k 5          # keep the last 5 snapshots on this remote
-jkey backup snaps aws             # list remote snapshots
-jkey backup verify aws            # sha256-check remote snapshots
-
-# Restore to a directory (safe mode; never touches the live vault)
-jkey backup restore aws
-jkey backup restore aws -d 20250611-143022 -o ./restored
-
-# Restore directly into the vault (asks for confirmation, transactional)
-jkey backup restore aws --into-vault
-jkey pv status                       # then unlock once to verify the restored vault
+jkey remote add s3 s3://my-bucket/jkey
+jkey backup s3
+jkey restore s3
 ```
 
-Snapshots are pruned automatically: `-k/--keep` or the remote's configured `keep` (default 5) — only the newest N snapshots stay on the remote.
+The name is your choice. Local directories, NAS mounts and USB drives work too:
 
-Credentials resolve in two steps: inline `--access-key`/`--secret-key` stored in `~/.config/jkey/remotes.json` (mode 600) win; otherwise boto3's default chain applies (env vars → `~/.aws/credentials` → IAM role). Manage inline credentials with `jkey backup cred <name>` / `--clear`; `ls` output is always masked.
+```bash
+jkey remote add nas /mnt/nas/jkey
+jkey backup nas
+jkey restore nas
+```
+
+Or reuse an existing rclone remote directly, with no jkey configuration:
+
+```bash
+jkey backup rclone:r2
+jkey restore rclone:r2
+```
+
+Both commands transfer encrypted data and need no master password. Restore asks for confirmation. Identical files are skipped; differing local files are kept as `filename.jkey.bak` before replacement. Existing `.bak` files are preserved with timestamped names for subsequent conflicts. Files present only locally are left alone. Nothing is merged automatically.
+
+Use `jkey restore s3 -o ./restored` to restore to a different directory. See [backend configuration and conflict handling](docs/backup.md) for details.
 
 ## How It Works
 
@@ -151,14 +131,16 @@ Data is encrypted with AES-256-CBC + HMAC-SHA256 and stored in `~/.config/jkey/`
 └── qr/               # Encrypted QR images
 ```
 
-For machine migration use `jkey backup run` + `jkey backup restore --into-vault`, or manually back up `~/.config/jkey/` (excluding `sessions/`).
+For machine migration use `jkey backup <remote>` + `jkey restore <remote>`, or manually back up `~/.config/jkey/` (excluding `sessions/`).
 
 ## Dependencies
 
 Runtime dependencies:
 
 - `portalocker` — cross-platform vault file locking
+- `keyring` — native OS credential storage for session passwords (no file-based fallback)
 - `opencv-python-headless` — optional, needed only for `jkey 2fa add` QR scanning. Install with `pip install jkey[qr]`.
-- `boto3` — optional, needed only for `s3://` backup remotes. Install with `pip install jkey[s3]`.
+- `boto3` — optional, needed only for native `s3://` backends. Install with `pip install jkey[s3]`.
+- `rclone` executable — optional, needed only for `rclone:` backends. Uses your existing rclone configuration.
 
 Pure Python, no OpenSSL or libsodium required.
