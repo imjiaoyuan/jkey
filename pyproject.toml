@@ -1,12 +1,12 @@
 [project]
 name = "jkey"
 version = "0.5.2"
-description = "Python library for password management and TOTP verification."
+description = "Command-line password manager and TOTP verifier."
 readme = "README.md"
 requires-python = ">=3.10"
 authors = [{name = "jiaoyuan", email = "imjiaoyuan@gmail.com"}]
 license = "MIT"
-dependencies = ["portalocker>=2.0,<3.0", "keyring>=25"]
+dependencies = ["portalocker>=2.0", "keyring>=25"]
 
 [project.optional-dependencies]
 qr = ["opencv-python-headless>=4.9.0,<5.0.0"]

@@ -1,7 +1,6 @@
 .venv
 .python-version
 .pytest_cache
-uv.lock
 __pycache__
 *.pyc
 *.tmp
