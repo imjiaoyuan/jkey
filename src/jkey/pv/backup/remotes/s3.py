@@ -8,11 +8,13 @@ _PROBE_BODY = b"jkey probe"
 
 def _is_s3_failure(e) -> bool:
     """True for AWS SDK failures and real I/O errors; programming bugs propagate."""
+    if isinstance(e, OSError):
+        return True
     try:
         from botocore.exceptions import BotoCoreError, ClientError
     except ImportError:
         return False
-    return isinstance(e, (BotoCoreError, ClientError, OSError))
+    return isinstance(e, (BotoCoreError, ClientError))
 
 
 def _client_error_reason(e) -> str | None:
