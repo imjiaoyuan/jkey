@@ -33,7 +33,4 @@ def decrypt_file(path: str, output_path: str | None = None):
         if "raw" in data:
             print("(binary data, use -o <file> to save)")
         else:
-            try:
-                print(raw.decode("utf-8"))
-            except UnicodeDecodeError:
-                raise JkeyError("Decrypted data is not valid UTF-8 text; use -o <file> to save.") from None
+            print(raw.decode("utf-8"))
