@@ -2,9 +2,21 @@
 
 import hashlib
 import os
+import sys
 
 _SERVICE = "jkey.session.v4"
 _ALLOWED = {"keyring.backends.SecretService", "keyring.backends.macOS", "keyring.backends.Windows"}
+_warned = False
+
+
+def _warn_once() -> None:
+    global _warned
+    if not _warned:
+        _warned = True
+        print(
+            "jkey: OS credential store rejected a session password; every new command will ask for it again.",
+            file=sys.stderr,
+        )
 
 
 def _backend():
@@ -33,6 +45,7 @@ def save(path, password):
         backend.set_password(_SERVICE, _account(path), password)
         return True
     except Exception:
+        _warn_once()
         return False
 
 
@@ -43,6 +56,7 @@ def load(path):
     try:
         return backend.get_password(_SERVICE, _account(path))
     except Exception:
+        _warn_once()
         return None
 
 
@@ -52,4 +66,4 @@ def delete(path):
         try:
             backend.delete_password(_SERVICE, _account(path))
         except Exception:
-            pass
+            _warn_once()
