@@ -784,3 +784,97 @@ class TestPmImportCsv:
         capsys.readouterr()
         assert load_passwords() == {}
         assert aes.decrypt(core.read_jkey(core.PASSWORDS_FILE), "test-password") == {}
+
+
+class TestPmAddConflictBranches:
+    def test_empty_suffix_reprompts(self, vault, capsys, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import load_passwords
+
+        inputs = iter(["s1", "s1", "a", "", "v2", "s2", "s2"])
+
+        def mock_prompt(p=""):
+            return next(inputs)
+
+        monkeypatch.setattr("getpass.getpass", mock_prompt)
+        monkeypatch.setattr("builtins.input", lambda p="": next(inputs))
+
+        add_password("myapp")
+        capsys.readouterr()
+        add_password("myapp")
+        captured = capsys.readouterr()
+        assert "Password stored: myapp-v2" in captured.out
+        assert load_passwords() == {"myapp": "s1", "myapp-v2": "s2"}
+
+    def test_eof_on_choice_cancels(self, vault, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import save_passwords
+
+        save_passwords({"myapp": "x"})
+
+        def boom(p=""):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", boom)
+        with pytest.raises(JkeyError, match="Cancelled"):
+            add_password("myapp")
+
+    def test_eof_on_suffix_cancels(self, vault, monkeypatch):
+        from jkey.pm.add import add_password
+        from jkey.pv.core import save_passwords
+
+        save_passwords({"myapp": "x"})
+        state = {"n": 0}
+
+        def fake_input(p=""):
+            state["n"] += 1
+            if state["n"] == 1:
+                return "a"
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", fake_input)
+        with pytest.raises(JkeyError, match="Cancelled"):
+            add_password("myapp")
+
+
+class TestRcAddBranches:
+    def test_unnameable_path(self, vault, tmp_path):
+        from jkey.rc.add import rc_add_file
+
+        d = tmp_path / "codes"
+        d.mkdir()
+        with pytest.raises(JkeyError, match="account name"):
+            rc_add_file(str(d) + "/")
+
+    def test_unreadable_file(self, vault, tmp_path, monkeypatch):
+        import builtins
+
+        from jkey.rc.add import rc_add_file
+
+        f = tmp_path / "acct.txt"
+        f.write_text("c1\n")
+        real_open = builtins.open
+
+        def guarded(path, *a, **k):
+            if str(path) == str(f):
+                raise PermissionError(13, "denied")
+            return real_open(path, *a, **k)
+
+        monkeypatch.setattr(builtins, "open", guarded)
+        with pytest.raises(JkeyError, match="Cannot read file"):
+            rc_add_file(str(f))
+
+    def test_eof_on_overwrite_cancels(self, vault, tmp_path, monkeypatch):
+        from jkey.pv.core import save_recovery
+        from jkey.rc.add import rc_add_file
+
+        save_recovery({"acct": ["old"]})
+
+        def boom(p=""):
+            raise EOFError
+
+        monkeypatch.setattr("builtins.input", boom)
+        f = tmp_path / "acct.txt"
+        f.write_text("new\n")
+        with pytest.raises(JkeyError, match="Import cancelled"):
+            rc_add_file(str(f))
