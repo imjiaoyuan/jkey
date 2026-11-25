@@ -37,7 +37,7 @@ Layering: CLI (`cli.py`) → domain modules (`2fa/`, `pm/`, `rc/`) → vault cor
 - `pv/session_store.py` — session passwords live only in native OS credential stores (Secret Service / macOS Keychain / Windows Credential Manager). No file-backed fallback, ever.
 - `pv/transaction.py` — recoverable multi-file vault updates (stage → commit → rollback with fsync); call only while holding the vault lock. Used by master-password changes and restore-style flows.
 - `pv/export.py` — export commands split into pure `_build_*_content()` and I/O-only `_export_*()`.
-- `pv/backup/` — ciphertext-only snapshots: unique tar.gz + `.sha256` manifest + `LATEST` pointer per remote; sessions/ and `.bak` files excluded; uploads verified by read-back before pruning. `remotes/` holds the backend ABC plus `local.py`, `s3.py` (lazy boto3) and `rclone.py` behind `open_remote()` scheme dispatch. Backend configuration details: [docs/backup.md](docs/backup.md).
+- `pv/backup/` — ciphertext-only snapshots: unique tar.gz + `.sha256` manifest + `LATEST` pointer per remote; sessions/ and `.bak` files excluded; uploads verified by read-back before pruning. `config.py` owns remotes.json I/O, `archive.py` builds/verifies/extracts snapshot archives, `core.py` keeps the command handlers and the restore pipeline; `remotes/` holds the backend ABC plus `local.py`, `s3.py` (lazy boto3) and `rclone.py` behind `open_remote()` scheme dispatch. Backend configuration details: [docs/backup.md](docs/backup.md).
 - `__init__.py` is intentionally empty — no public library API, CLI only.
 
 ## Conventions

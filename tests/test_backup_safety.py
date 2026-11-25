@@ -14,6 +14,7 @@ import pytest
 
 from jkey.errors import JkeyError
 from jkey.pv import core, transaction
+from jkey.pv.backup import archive
 from jkey.pv.backup import core as backup
 from jkey.pv.backup.remotes.local import LocalRemote
 from jkey.pv.backup.remotes.s3 import S3Remote
@@ -40,7 +41,7 @@ def snapshot(remote):
 
 def test_same_second_runs_preserve_distinct_snapshots(configured, monkeypatch):
     _, remote = configured
-    monkeypatch.setattr(backup.time, "strftime", lambda *_: "20261111-140000")
+    monkeypatch.setattr(archive.time, "strftime", lambda *_: "20261111-140000")
     backup._cmd_run(args())
     backup._cmd_run(args())
     assert len(list(remote.glob("*.tar.gz"))) == 2

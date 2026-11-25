@@ -6,6 +6,15 @@ from jkey.pv.backup.remotes.base import Remote, safe_remote_key
 _PROBE_BODY = b"jkey probe"
 
 
+def _is_s3_failure(e) -> bool:
+    """True for AWS SDK failures and real I/O errors; programming bugs propagate."""
+    try:
+        from botocore.exceptions import BotoCoreError, ClientError
+    except ImportError:
+        return False
+    return isinstance(e, (BotoCoreError, ClientError, OSError))
+
+
 def _client_error_reason(e) -> str | None:
     """Map botocore error codes to actionable hints."""
     code = getattr(e, "response", {}).get("Error", {}).get("Code", "") if hasattr(e, "response") else ""
@@ -74,6 +83,8 @@ class S3Remote(Remote):
         try:
             self._client = boto3.client("s3", **kwargs)
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("client init", self.url, e) from e
         return self._client
 
@@ -86,12 +97,16 @@ class S3Remote(Remote):
         try:
             self._s3().upload_file(local_path, self.bucket, self._key(key), Callback=progress)
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("upload", self.url, e) from e
 
     def get(self, key: str, dest_path: str, progress=None) -> None:
         try:
             self._s3().download_file(self.bucket, self._key(key), dest_path, Callback=progress)
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("download", self.url, e) from e
 
     def list_keys(self) -> list[str]:
@@ -114,6 +129,8 @@ class S3Remote(Remote):
                 seen.add(token)
                 kwargs["ContinuationToken"] = token
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("list", self.url, e) from e
         return sorted(names)
 
@@ -121,13 +138,17 @@ class S3Remote(Remote):
         try:
             resp = self._s3().head_object(Bucket=self.bucket, Key=self._key(key))
             return resp["ContentLength"]
-        except Exception:
-            return None
+        except Exception as e:
+            if _is_s3_failure(e):
+                return None
+            raise
 
     def delete(self, key: str) -> None:
         try:
             self._s3().delete_object(Bucket=self.bucket, Key=self._key(key))
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("delete", self.url, e) from e
 
     def probe(self) -> None:
@@ -140,6 +161,8 @@ class S3Remote(Remote):
 
             s3.upload_fileobj(io.BytesIO(_PROBE_BODY), self.bucket, key)
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("probe write", self.url, e) from e
         succeeded = False
         try:
@@ -150,10 +173,14 @@ class S3Remote(Remote):
         except JkeyError:
             raise
         except Exception as e:
+            if not _is_s3_failure(e):
+                raise
             raise _wrap_s3_error("probe read", self.url, e) from e
         finally:
             try:
                 s3.delete_object(Bucket=self.bucket, Key=key)
             except Exception as e:
                 if succeeded:
+                    if not _is_s3_failure(e):
+                        raise
                     raise _wrap_s3_error("probe delete", self.url, e) from e

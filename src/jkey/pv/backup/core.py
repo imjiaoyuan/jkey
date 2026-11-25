@@ -1,4 +1,4 @@
-"""Vault backup to S3, local directories, and existing rclone remotes.
+"""Vault backup and restore: remote upload with verification, snapshot history, restore pipeline.
 
 Backs up the encrypted vault files as-is — no master password involved, nothing plaintext
 ever leaves the machine. Remote layout per remote root:
@@ -8,176 +8,47 @@ ever leaves the machine. Remote layout per remote root:
     LATEST           name of the newest snapshot file
 
 Remotes are configured in ~/.config/jkey/remotes.json (mode 600, same dir as the vault).
+Snapshot archive handling lives in archive.py, configuration in config.py.
 """
 
 import base64
 import binascii
-import hashlib
-import io
 import json
 import os
 import sys
-import tarfile
 import tempfile
-import textwrap
-import time
-import uuid
 from urllib.parse import urlparse
 
 from jkey.errors import JkeyError
 from jkey.pv import core, transaction
+from jkey.pv.backup.archive import (
+    _VAULT_FILES,
+    _build_snapshot,
+    _collect_vault_files,
+    _extract,
+    _latest_stamp,
+    _prune,
+    _sha256,
+    _snapshot_names,
+    _stamp,
+    _verify_archive,
+    _write_latest,
+)
+from jkey.pv.backup.config import (
+    _INIT_TEMPLATE,
+    _get_remote,
+    _redacted,
+    _remotes_file,
+    load_remotes,
+    save_remotes,
+    urlparse_scheme,
+)
 from jkey.pv.backup.remotes import open_remote
 from jkey.pv.backup.remotes.base import _LATEST, snapshot_stamp, valid_snapshot
 
 
-def _remotes_file() -> str:
-    """Computed on call so tests that patch core.CONFIG_DIR never see a stale path."""
-    return os.path.join(core.CONFIG_DIR, "remotes.json")
-
-
-# Vault files that go into a snapshot (relative names inside the tar). QR images are added as qr/<name>.jkey.
-_VAULT_FILES = ("totp.jkey", "passwords.jkey", "recovery.jkey")
-
-
-# ---------------------------------------------------------------- config file
-
-
-def load_remotes() -> dict:
-    try:
-        with open(_remotes_file(), encoding="utf-8") as f:
-            data = json.loads("".join(line for line in f if not line.lstrip().startswith("#")))
-        return data if isinstance(data, dict) else {}
-    except FileNotFoundError:
-        return {}
-    except (json.JSONDecodeError, OSError) as e:
-        raise JkeyError(f"cannot read backup config {_remotes_file()}: {e}") from e
-
-
-def save_remotes(remotes: dict) -> None:
-    text = (
-        textwrap.dedent(
-            """\
-        # jkey backup remotes. Edit with: jkey remote init
-        # One JSON object per remote. Fill url (s3://bucket/prefix or a local path),
-        # rename the key to your remote's name, then delete its _comment.
-        # Entries whose url is still empty are template placeholders — jkey ignores them.
-        # endpoint/region: for S3-compatible providers (OSS, COS, MinIO, R2, B2); omit for AWS.
-        # access_key/secret_key: leave both out to use the AWS default chain (~/.aws, env, IAM role).
-        # keep: snapshots to retain on that remote (default 5).
-        """
-        )
-        + json.dumps(remotes, indent=4, ensure_ascii=False)
-        + "\n"
-    )
-    core.ensure_dir()
-    core.write_secure_text(_remotes_file(), text, atomic=True)
-
-
-def _get_remote(name: str, remotes: dict | None = None) -> dict:
-    if name.startswith("rclone:"):
-        return {"url": name}
-    cfg = (remotes if remotes is not None else load_remotes()).get(name)
-    if cfg is None:
-        raise JkeyError(f"Backup remote '{name}' not configured. Run 'jkey remote init' to edit the config.")
-    if not cfg.get("url"):
-        raise JkeyError(f"Backup remote '{name}' is a template entry: fill in 'url' with 'jkey remote init'.")
-    return cfg
-
-
-def _mask_secret(value: str | None) -> str:
-    return f"...{value[-4:]}" if value else "not set"
-
-
-def _redacted(cfg: dict) -> dict:
-    out = {k: v for k, v in cfg.items() if k not in ("access_key", "secret_key")}
-    if cfg.get("access_key"):
-        out["access_key"] = _mask_secret(cfg["access_key"])
-        out["secret_key"] = _mask_secret(cfg["secret_key"])
-    return out
-
-
-# ------------------------------------------------------------------ snapshots
-
-
-def _collect_vault_files() -> list[tuple[str, str]]:
-    """(archive_name, absolute_path) pairs for every vault file that exists."""
-    pairs = []
-    for name in _VAULT_FILES:
-        path = os.path.join(core.CONFIG_DIR, name)
-        if os.path.exists(path):
-            pairs.append((name, path))
-    if os.path.isdir(core.QR_DIR):
-        for img in sorted(os.listdir(core.QR_DIR)):
-            if img.endswith(".jkey"):
-                pairs.append((f"qr/{img}", os.path.join(core.QR_DIR, img)))
-    if not pairs:
-        raise JkeyError("Nothing to back up: vault is empty. Run 'jkey pv init' first.")
-    return pairs
-
-
-def _build_snapshot(pairs: list[tuple[str, str]], dest: str) -> str:
-    metadata = {"version": 1, "files": {}}
-    with tarfile.open(dest, "w:gz") as tar:
-        for arcname, path in pairs:
-            if not os.path.isfile(path) or os.path.islink(path):
-                raise JkeyError(f"Refusing non-regular vault file: {path}")
-            with open(path, "rb") as f:
-                data = f.read()
-            metadata["files"][arcname] = {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-            info = tarfile.TarInfo(arcname)
-            info.mode = 0o600
-            info.size = len(data)
-            tar.addfile(info, io.BytesIO(data))
-        payload = json.dumps(metadata, sort_keys=True).encode()
-        info = tarfile.TarInfo("snapshot.json")
-        info.mode = 0o600
-        info.size = len(payload)
-        tar.addfile(info, io.BytesIO(payload))
-    return dest
-
-
-def _sha256(path: str) -> str:
-    h = hashlib.sha256()
-    with open(path, "rb") as f:
-        for chunk in iter(lambda: f.read(65536), b""):
-            h.update(chunk)
-    return h.hexdigest()
-
-
 def _remote(remote_cfg: dict):
     return open_remote(remote_cfg)
-
-
-def _snapshot_names(remote) -> list[str]:
-    return sorted(n for n in remote.list_keys() if valid_snapshot(n))
-
-
-def _completed_snapshot_names(remote):
-    keys = set(remote.list_keys())
-    return sorted(n for n in keys if valid_snapshot(n) and f"{snapshot_stamp(n)}.sha256" in keys)
-
-
-def _latest_stamp(remote) -> str | None:
-    # An interrupted upload must not supersede a completed recovery point.
-    # Listing also avoids a stale LATEST pointer from a concurrent/older writer.
-    snaps = _completed_snapshot_names(remote)
-    return snapshot_stamp(snaps[-1]) if snaps else None
-
-
-def _prune(remote, keep: int) -> list[str]:
-    """Delete oldest snapshots beyond `keep`. Returns removed snapshot names."""
-    if keep <= 0:
-        return []
-    snaps = _completed_snapshot_names(remote)
-    to_remove = snaps[:-keep] if len(snaps) > keep else []
-    for name in to_remove:
-        remote.delete(name)
-        remote.delete(f"{snapshot_stamp(name)}.sha256")
-    return to_remove
-
-
-def _stamp() -> str:
-    return time.strftime("%Y%m%d-%H%M%S") + "-" + f"{time.time_ns():016x}{uuid.uuid4().hex[:16]}"
 
 
 # ------------------------------------------------------------- subcommand impl
@@ -210,7 +81,7 @@ def _cmd_add(args) -> None:
     print(f"Added backup remote '{name}': {args.url}")
 
     if cfg.get("access_key"):
-        print("Warning: credentials stored in plaintext in remotes.json", file=__import__("sys").stderr)
+        print("Warning: credentials stored in plaintext in remotes.json", file=sys.stderr)
 
     if not args.no_test:
         _run_probe(name, cfg)
@@ -289,28 +160,6 @@ def _cmd_cred(args) -> None:
     print(f"Credentials updated for '{args.name}'.")
 
 
-_INIT_TEMPLATE = {
-    "example-s3": {
-        "_comment": (
-            "S3-compatible example. url = s3://<bucket>/<prefix> — the bucket must already exist "
-            "(jkey does not create buckets; create it in the provider console first). "
-            "endpoint/region for non-AWS providers, access_key + secret_key leave empty for the "
-            "AWS default chain, then delete this _comment."
-        ),
-        "url": "",
-        "endpoint": "",
-        "region": "",
-        "access_key": "",
-        "secret_key": "",
-        "keep": 5,
-    },
-    "example-local": {
-        "_comment": "Local path example (NAS mount, USB drive). Rename the key, fill url, then delete this _comment.",
-        "url": "",
-    },
-}
-
-
 def _cmd_init(args) -> None:
     """Create the config with a template on first use; with a config present, just point at it."""
     if load_remotes():
@@ -318,14 +167,6 @@ def _cmd_init(args) -> None:
         return
     save_remotes(_INIT_TEMPLATE)
     print(f"Template written to {_remotes_file()}. Edit it to configure a remote, then run 'jkey remote ls'.")
-
-
-def urlparse_scheme(url: str) -> str:
-    scheme = urlparse(url).scheme.lower()
-    # Windows drive letters ("C:\..." or "C:/...") parse as a single-letter scheme — a local path.
-    if len(scheme) == 1 and len(url) > 2 and url[1] == ":" and url[2] in ("\\", "/"):
-        return ""
-    return scheme
 
 
 class _TransferProgress:
@@ -427,13 +268,6 @@ def _cmd_run(args) -> None:
         raise JkeyError("Backup failed for " + "; ".join(failures))
 
 
-def _write_latest(tmpdir: str, stamp: str) -> str:
-    p = os.path.join(tmpdir, "LATEST")
-    with open(p, "w", encoding="ascii") as f:
-        f.write(f"{stamp}.tar.gz\n")
-    return p
-
-
 def _cmd_snaps(args) -> None:
     cfg = _get_remote(args.name)
     remote = _remote(cfg)
@@ -443,18 +277,6 @@ def _cmd_snaps(args) -> None:
         return
     for n in snaps:
         print(n)
-
-
-def _verify_archive(archive: str, manifest_path: str, snapshot: str) -> None:
-    expected = ""
-    try:
-        with open(manifest_path, encoding="ascii") as f:
-            expected = f.read().split()[0]
-    except (OSError, IndexError, UnicodeError):
-        raise JkeyError(f"corrupt or missing manifest for {snapshot}")
-    actual = _sha256(archive)
-    if actual != expected:
-        raise JkeyError(f"checksum mismatch for {snapshot}: expected {expected}, got {actual}")
 
 
 def _cmd_restore(args) -> None:
@@ -472,24 +294,24 @@ def _cmd_restore(args) -> None:
 
     tmpdir = tempfile.mkdtemp(prefix="jkey-restore-")
     try:
-        archive = os.path.join(tmpdir, snapshot)
+        archive_path = os.path.join(tmpdir, snapshot)
         manifest = os.path.join(tmpdir, f"{snapshot_stamp(snapshot)}.sha256")
         progress = _TransferProgress(f"Downloading {snapshot}")
         progress.set_total(remote.size(snapshot))
         try:
-            remote.get(snapshot, archive, progress=progress)
+            remote.get(snapshot, archive_path, progress=progress)
         except BaseException:
             progress.abort()
             raise
         progress.finish()
         remote.get(f"{snapshot_stamp(snapshot)}.sha256", manifest)
-        _verify_archive(archive, manifest, snapshot)
+        _verify_archive(archive_path, manifest, snapshot)
 
         into_vault = not args.output
         out_dir = args.output or os.path.join(tmpdir, "extracted")
         extracted = os.path.join(tmpdir, "verified")
         os.mkdir(extracted, mode=0o700)
-        _extract(archive, extracted)
+        _extract(archive_path, extracted)
         if into_vault:
             _confirm_and_write_into_vault(extracted)
         else:
@@ -499,52 +321,6 @@ def _cmd_restore(args) -> None:
         import shutil
 
         shutil.rmtree(tmpdir, ignore_errors=True)
-
-
-def _extract(archive: str, out_dir: str) -> None:
-    """Validate names, types, bounds and file manifest before writing any vault data."""
-    base = os.path.realpath(out_dir)
-    try:
-        with tarfile.open(archive, "r:gz") as tar:
-            members = tar.getmembers()
-            if len(members) > 10000 or sum(m.size for m in members) > 512 * 1024 * 1024:
-                raise JkeyError("Snapshot exceeds restore size or file-count limits")
-            names = set()
-            contents = {}
-            for member in members:
-                name = member.name
-                target = os.path.realpath(os.path.join(base, name))
-                if not target.startswith(base + os.sep):
-                    raise JkeyError(f"snapshot entry escapes restore dir — refusing: {name}")
-                if member.isdir() and name == "qr":
-                    continue  # Legacy archives included the directory entry.
-                if not member.isfile() or name in names:
-                    raise JkeyError(f"snapshot contains a link, special file or duplicate — refusing: {name}")
-                if name != "snapshot.json":
-                    transaction._target(base, name)
-                names.add(name)
-                with tar.extractfile(member) as f:
-                    contents[name] = f.read()
-            payload = contents.pop("snapshot.json", None)
-            if payload is not None:
-                metadata = json.loads(payload)
-                if metadata.get("version") != 1 or not isinstance(metadata.get("files"), dict):
-                    raise JkeyError("Unsupported or corrupt snapshot format")
-                expected = {name: {"size": len(data), "sha256": hashlib.sha256(data).hexdigest()}
-                            for name, data in contents.items()}
-                if metadata["files"] != expected:
-                    raise JkeyError("Snapshot file manifest mismatch")
-            if not any(name in contents for name in _VAULT_FILES):
-                raise JkeyError("Snapshot contains no vault files")
-            for name, data in contents.items():
-                dest = transaction._target(base, name)
-                dest.parent.mkdir(mode=0o700, exist_ok=True)
-                # Exclusive creation prevents merging a snapshot with pre-existing files.
-                fd = os.open(dest, os.O_WRONLY | os.O_CREAT | os.O_EXCL, 0o600)
-                with os.fdopen(fd, "wb") as f:
-                    f.write(data)
-    except (tarfile.TarError, OSError, ValueError, TypeError, AttributeError) as e:
-        raise JkeyError(f"Cannot extract snapshot: {e}") from e
 
 
 def _decrypt_snapshot(out_dir, password):
