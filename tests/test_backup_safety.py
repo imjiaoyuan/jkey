@@ -268,7 +268,7 @@ def test_s3_broken_pagination_fails_instead_of_silently_truncating():
 
     remote = S3Remote("s3://bucket/prefix")
     remote._client = Client()
-    with pytest.raises(JkeyError, match="s3 list failed"):
+    with pytest.raises(JkeyError, match="truncated listing"):
         remote.list_keys()
 
 
