@@ -25,7 +25,7 @@ class _VersionAction(argparse.Action):
 def _build_parser():
     parser = argparse.ArgumentParser(
         prog="jkey",
-        description="Python library for password management and TOTP verification",
+        description="Command-line password manager and TOTP verifier",
     )
     parser.add_argument(
         "-v", "--version", action=_VersionAction, default=argparse.SUPPRESS, help="show version and exit"
